@@ -2,53 +2,80 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 /* ─────────────────────────────────────────────
-   SHEETS HOOK — อ่าน/เขียน Google Sheets จริง
-   ถ้าไม่ตั้งค่า URL จะใช้ Mock Data แทน
+   SHEETS HOOK — อ่าน/เขียน/ลบ Google Sheets
 ───────────────────────────────────────────── */
 function useSheetData(sheetName, mockData) {
   const [data, setData]       = useState(mockData);
   const [syncing, setSyncing] = useState(false);
+  const [loaded, setLoaded]   = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const res  = await fetch(`/api/sheets?action=read&sheet=${sheetName}`);
+      const res  = await fetch(`/api/sheets?action=read&sheet=${sheetName}`, { cache:"no-store" });
       const json = await res.json();
-      if (json.demo || json.error) return; // ใช้ mock ต่อ
-      if (json.data && json.data.length > 0) setData(json.data);
-    } catch {}
+      if (json.demo || json.error) return;
+      if (Array.isArray(json.data)) {
+        setData(json.data);
+        setLoaded(true);
+      }
+    } catch (e) {
+      console.error("load error:", sheetName, e);
+    }
   }, [sheetName]);
 
+  // โหลดตอนเริ่มต้น
   useEffect(() => { load(); }, [load]);
+
+  // โหลดซ้ำทุก 30 วินาที
+  useEffect(() => {
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+  }, [load]);
 
   const add = async (item) => {
     setSyncing(true);
     try {
-      const res  = await fetch("/api/sheets", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ action:"create", sheet:sheetName, data:item }) });
+      const res  = await fetch("/api/sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action:"create", sheet:sheetName, data:item }),
+      });
       const json = await res.json();
-      if (json.demo) {
+      if (json.demo || json.error) {
+        // Demo mode — เพิ่มใน local state
         setData(prev => [...prev, { ...item, id: sheetName[0].toUpperCase() + Date.now() }]);
       } else {
+        // โหลดข้อมูลใหม่จาก Sheets
         await load();
       }
-    } catch { setData(prev => [...prev, { ...item, id: sheetName[0].toUpperCase() + Date.now() }]); }
+    } catch {
+      setData(prev => [...prev, { ...item, id: sheetName[0].toUpperCase() + Date.now() }]);
+    }
     setSyncing(false);
   };
 
   const remove = async (id) => {
     setSyncing(true);
+    // ลบใน local state ก่อนให้รู้สึกเร็ว
+    setData(prev => prev.filter(r => r.id !== id));
     try {
-      const res  = await fetch("/api/sheets", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ action:"delete", sheet:sheetName, id }) });
+      const res  = await fetch("/api/sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action:"delete", sheet:sheetName, id }),
+      });
       const json = await res.json();
-      if (json.demo) {
-        setData(prev => prev.filter(r => r.id !== id));
-      } else {
+      if (!json.demo && !json.error) {
+        // โหลดข้อมูลใหม่จาก Sheets เพื่อยืนยัน
         await load();
       }
-    } catch { setData(prev => prev.filter(r => r.id !== id)); }
+    } catch (e) {
+      console.error("delete error:", e);
+    }
     setSyncing(false);
   };
 
-  return { data, syncing, add, remove, reload: load };
+  return { data, syncing, loaded, add, remove, reload: load };
 }
 
 /* ─────────────────────────────────────────────

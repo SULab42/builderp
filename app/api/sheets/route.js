@@ -1,37 +1,51 @@
 // app/api/sheets/route.js
-// ─────────────────────────────────────────────
-// Proxy ระหว่าง Next.js app กับ Google Apps Script
-// ─────────────────────────────────────────────
-
 const APPS_SCRIPT_URL = process.env.NEXT_PUBLIC_APPS_SCRIPT_URL;
+
+const IS_CONFIGURED = APPS_SCRIPT_URL && 
+  APPS_SCRIPT_URL !== "YOUR_APPS_SCRIPT_WEB_APP_URL" && 
+  APPS_SCRIPT_URL !== "https://api.example.com";
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get("action");
-  const sheet = searchParams.get("sheet");
+  const sheet  = searchParams.get("sheet");
 
-  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === "YOUR_APPS_SCRIPT_WEB_APP_URL") {
-    return Response.json({ error: "Apps Script URL not configured", demo: true });
+  if (!IS_CONFIGURED) {
+    return Response.json({ error: "not_configured", demo: true });
   }
 
-  const url = `${APPS_SCRIPT_URL}?action=${action}&sheet=${sheet}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return Response.json(data);
+  try {
+    const url = `${APPS_SCRIPT_URL}?action=${action}&sheet=${sheet}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+    });
+    const text = await res.text();
+    const data = JSON.parse(text);
+    return Response.json(data);
+  } catch (e) {
+    return Response.json({ error: e.message });
+  }
 }
 
 export async function POST(request) {
-  const body = await request.json();
-
-  if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL === "YOUR_APPS_SCRIPT_WEB_APP_URL") {
-    return Response.json({ error: "Apps Script URL not configured", demo: true });
+  if (!IS_CONFIGURED) {
+    return Response.json({ error: "not_configured", demo: true });
   }
 
-  const res = await fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  return Response.json(data);
+  try {
+    const body = await request.json();
+    const res  = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    const text = await res.text();
+    const data = JSON.parse(text);
+    return Response.json(data);
+  } catch (e) {
+    return Response.json({ error: e.message });
+  }
 }
