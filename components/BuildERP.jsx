@@ -55,48 +55,12 @@ function useSheetData(sheetName, mockData) {
    MOCK DATA
 ───────────────────────────────────────────── */
 const INIT = {
-  projects: [
-    { id:"P001", name:"อาคารพาณิชย์ สุขุมวิท 101", client:"บริษัท ABC จำกัด", budget:12500000, spent:9800000, status:"กำลังดำเนินการ", progress:62, startDate:"2026-01-15", endDate:"2026-09-30", manager:"สมชาย ใจดี", tasksTotal:18, tasksDone:11 },
-    { id:"P002", name:"บ้านพักอาศัย รามอินทรา", client:"คุณวิภา รักงาน", budget:3200000, spent:3200000, status:"เสร็จสิ้น", progress:100, startDate:"2025-08-01", endDate:"2026-02-28", manager:"สมหญิง มานะ", tasksTotal:12, tasksDone:12 },
-    { id:"P003", name:"โกดังสินค้า ลาดกระบัง", client:"บริษัท XYZ โลจิสติกส์", budget:8700000, spent:1200000, status:"เริ่มใหม่", progress:14, startDate:"2026-05-01", endDate:"2027-01-31", manager:"วิชัย ขยัน", tasksTotal:24, tasksDone:3 },
-    { id:"P004", name:"ปรับปรุงอาคาร บางนา", client:"ห้างหุ้นส่วน DEF", budget:1800000, spent:1650000, status:"กำลังดำเนินการ", progress:53, startDate:"2026-03-10", endDate:"2026-07-20", manager:"สมชาย ใจดี", tasksTotal:9, tasksDone:5 },
-  ],
-  tasks: [
-    { id:"T001", projectId:"P001", title:"เทพื้นชั้น 3", assignee:"ทีมช่าง A", status:"เสร็จแล้ว", priority:"สูง", due:"2026-05-20", category:"โครงสร้าง" },
-    { id:"T002", projectId:"P001", title:"งานไฟฟ้าชั้น 2-3", assignee:"ทีมไฟฟ้า", status:"กำลังทำ", priority:"สูง", due:"2026-06-10", category:"ระบบ" },
-    { id:"T003", projectId:"P001", title:"ฉาบปูนภายนอก", assignee:"ทีมช่าง B", status:"รอดำเนินการ", priority:"กลาง", due:"2026-07-01", category:"ตกแต่ง" },
-    { id:"T004", projectId:"P003", title:"วางรากฐาน Zone A", assignee:"ทีมช่าง C", status:"กำลังทำ", priority:"สูง", due:"2026-06-30", category:"โครงสร้าง" },
-    { id:"T005", projectId:"P004", title:"รื้อถอนโครงสร้างเดิม", assignee:"ทีมรื้อถอน", status:"เสร็จแล้ว", priority:"กลาง", due:"2026-04-15", category:"รื้อถอน" },
-    { id:"T006", projectId:"P004", title:"ติดตั้งระบบปรับอากาศ", assignee:"ทีมแอร์", status:"กำลังทำ", priority:"กลาง", due:"2026-07-15", category:"ระบบ" },
-  ],
-  expenses: [
-    { id:"EX001", projectId:"P001", description:"วัสดุก่อสร้าง - เหล็กเส้น", amount:850000, date:"2026-04-10", category:"วัสดุ", by:"สมชาย ใจดี" },
-    { id:"EX002", projectId:"P001", description:"ค่าแรงงาน เดือนเมษายน", amount:320000, date:"2026-04-30", category:"แรงงาน", by:"สมชาย ใจดี" },
-    { id:"EX003", projectId:"P001", description:"ปูนซีเมนต์ + กรวด", amount:280000, date:"2026-05-15", category:"วัสดุ", by:"สมชาย ใจดี" },
-    { id:"EX004", projectId:"P001", description:"ค่าเช่าแม่แรง + เครน", amount:450000, date:"2026-05-01", category:"เครื่องจักร", by:"สมชาย ใจดี" },
-    { id:"EX005", projectId:"P003", description:"ค่าเช่าเครื่องจักร", amount:180000, date:"2026-05-15", category:"เครื่องจักร", by:"วิชัย ขยัน" },
-    { id:"EX006", projectId:"P004", description:"อุปกรณ์ไฟฟ้า + แอร์", amount:650000, date:"2026-06-01", category:"วัสดุ", by:"สมชาย ใจดี" },
-  ],
-  materials: [
-    { id:"M001", name:"เหล็กเส้น Ø12mm", unit:"เส้น", qty:240, minStock:50, price:185, supplier:"บ.เหล็กไทย", location:"โกดัง A" },
-    { id:"M002", name:"ปูนซีเมนต์ TPI", unit:"ถุง", qty:18, minStock:30, price:145, supplier:"TPI โปลีน", location:"โกดัง A" },
-    { id:"M003", name:"กระเบื้อง 60x60", unit:"ตร.ม.", qty:320, minStock:80, price:280, supplier:"นิ่มซิตี้", location:"โกดัง B" },
-    { id:"M004", name:"สายไฟ IEC 2.5mm", unit:"ม้วน", qty:45, minStock:20, price:1250, supplier:"ไทยยาซากิ", location:"โกดัง C" },
-    { id:"M005", name:"ท่อ PVC 4นิ้ว", unit:"ท่อน", qty:8, minStock:15, price:320, supplier:"ท่อไทย", location:"โกดัง B" },
-    { id:"M006", name:"ทราย", unit:"คิว", qty:55, minStock:20, price:450, supplier:"ทรายน้ำดี", location:"โกดัง A" },
-  ],
-  invoices: [
-    { id:"INV001", projectId:"P001", client:"บริษัท ABC จำกัด", items:[{desc:"งานโครงสร้างชั้น 3",qty:1,unit:"งวด",price:2500000},{desc:"ค่าวัสดุ",qty:1,unit:"รอบ",price:350000}], status:"ชำระแล้ว", issueDate:"2026-05-01", dueDate:"2026-05-31", note:"งวดที่ 3" },
-    { id:"INV002", projectId:"P004", client:"ห้างหุ้นส่วน DEF", items:[{desc:"งานปรับปรุงภายใน",qty:1,unit:"งวด",price:900000}], status:"รอชำระ", issueDate:"2026-06-01", dueDate:"2026-06-30", note:"งวดที่ 2" },
-    { id:"INV003", projectId:"P003", client:"บริษัท XYZ โลจิสติกส์", items:[{desc:"งานวางรากฐาน Zone A",qty:1,unit:"งวด",price:1200000},{desc:"ค่าเครื่องจักร",qty:1,unit:"เดือน",price:180000}], status:"ร่าง", issueDate:"2026-06-05", dueDate:"2026-07-05", note:"งวดที่ 1" },
-  ],
-  employees: [
-    { id:"E001", name:"สมชาย ใจดี", role:"ผู้จัดการโครงการ", phone:"081-234-5678", status:"ทำงาน", projects:2 },
-    { id:"E002", name:"สมหญิง มานะ", role:"วิศวกรโยธา", phone:"082-345-6789", status:"ทำงาน", projects:1 },
-    { id:"E003", name:"วิชัย ขยัน", role:"หัวหน้างาน", phone:"083-456-7890", status:"ทำงาน", projects:1 },
-    { id:"E004", name:"ประสิทธิ์ ดีมาก", role:"ช่างก่อสร้าง", phone:"084-567-8901", status:"ลาพัก", projects:1 },
-    { id:"E005", name:"มาลี รักงาน", role:"สถาปนิก", phone:"085-678-9012", status:"ทำงาน", projects:2 },
-  ],
+  projects: [],
+  tasks: [],
+  expenses: [],
+  materials: [],
+  invoices: [],
+  employees: [],
 };
 
 /* ─────────────────────────────────────────────
@@ -292,7 +256,7 @@ function Dashboard({data}) {
 /* ─────────────────────────────────────────────
    MATERIALS
 ───────────────────────────────────────────── */
-function Materials({data,onAdd}) {
+function Materials({data,onAdd,onRemove}) {
   const [showForm,setShowForm] = useState(false);
   const [form,setForm] = useState({name:"",unit:"",qty:"",minStock:"",price:"",supplier:"",location:""});
   const f = k => v => setForm(p=>({...p,[k]:v}));
@@ -354,6 +318,10 @@ function Materials({data,onAdd}) {
                   <div style={{color:"#a78bfa",fontSize:14,fontWeight:700}}>฿{fmt(m.price)}/{m.unit}</div>
                   <div style={{color:"#64748b",fontSize:11,marginTop:2}}>รวม ฿{fmt(m.qty*m.price)}</div>
                   {low&&<Badge text="สต็อกต่ำ" color="#ef4444"/>}
+                  <button onClick={()=>{if(window.confirm(`ลบวัสดุ "${m.name}" ใช่มั้ย?`))onRemove(m.id);}}
+                    style={{marginTop:6,background:"#ef444411",border:"1px solid #ef444433",borderRadius:6,padding:"4px 10px",color:"#ef4444",fontSize:11,cursor:"pointer",display:"block",width:"100%"}}>
+                    🗑️ ลบ
+                  </button>
                 </div>
               </div>
             </Card>
@@ -367,7 +335,7 @@ function Materials({data,onAdd}) {
 /* ─────────────────────────────────────────────
    INVOICES
 ───────────────────────────────────────────── */
-function Invoices({data,onAdd}) {
+function Invoices({data,onAdd,onRemove}) {
   const [showForm,setShowForm] = useState(false);
   const [selected,setSelected] = useState(null);
   const [form,setForm] = useState({projectId:"",client:"",note:"",dueDate:"",items:[{desc:"",qty:1,unit:"งวด",price:""}]});
@@ -453,7 +421,13 @@ function Invoices({data,onAdd}) {
                       <span style={{color:"#e2e8f0"}}>{it.qty} {it.unit} × ฿{fmt(it.price)} = <strong style={{color:"#a78bfa"}}>฿{fmt(it.qty*it.price)}</strong></span>
                     </div>
                   ))}
-                  <div style={{display:"flex",justifyContent:"flex-end",marginTop:10,fontSize:15,fontWeight:800,color:"#a78bfa"}}>รวมทั้งสิ้น ฿{fmt(total)}</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+                    <button onClick={e=>{e.stopPropagation();if(window.confirm(`ลบใบแจ้งหนี้ ${inv.id} ใช่มั้ย?`))onRemove(inv.id);}}
+                      style={{background:"#ef444411",border:"1px solid #ef444433",borderRadius:6,padding:"5px 12px",color:"#ef4444",fontSize:12,cursor:"pointer"}}>
+                      🗑️ ลบใบแจ้งหนี้
+                    </button>
+                    <div style={{fontSize:15,fontWeight:800,color:"#a78bfa"}}>รวมทั้งสิ้น ฿{fmt(total)}</div>
+                  </div>
                 </div>
               )}
             </Card>
@@ -991,8 +965,8 @@ export default function BuildERPComplete() {
           {tab==="dashboard" && <Dashboard data={data}/>}
           {tab==="projects"  && <Projects data={data} onAdd={item=>projectsSheet.add(item)} onRemove={id=>projectsSheet.remove(id)}/>}
           {tab==="tasks"     && <Tasks data={data} onAdd={item=>tasksSheet.add(item)} onRemove={id=>tasksSheet.remove(id)}/>}
-          {tab==="materials" && <Materials data={data} onAdd={item=>materialsSheet.add(item)}/>}
-          {tab==="invoices"  && <Invoices data={data} onAdd={item=>invoicesSheet.add(item)}/>}
+          {tab==="materials" && <Materials data={data} onAdd={item=>materialsSheet.add(item)} onRemove={id=>materialsSheet.remove(id)}/>}
+          {tab==="invoices"  && <Invoices data={data} onAdd={item=>invoicesSheet.add(item)} onRemove={id=>invoicesSheet.remove(id)}/>}
           {tab==="ai"        && <AIModule data={data}/>}
           {tab==="notif"     && (
             <NotifPanel
