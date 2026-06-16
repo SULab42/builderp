@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { getUserFromCookie, getUserRole, ROLES } from "../lib/auth";
 
 /* ─────────────────────────────────────────────
    SHEETS HOOK — อ่าน/เขียน/ลบ Google Sheets
@@ -872,7 +873,42 @@ function Tasks({data,onAdd,onRemove}) {
 /* ─────────────────────────────────────────────
    MAIN APP
 ───────────────────────────────────────────── */
+// ─── Auth Wrapper ───────────────────────────────
+function LoginRequired({ children }) {
+  const [user, setUser]       = useState(null);
+  const [role, setRole]       = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const u = getUserFromCookie();
+    if (!u) { window.location.href = "/login"; return; }
+    setUser(u);
+    getUserRole(u.userId).then(r => {
+      if (!r) { window.location.href = "/login?error=no_access"; return; }
+      setRole(r);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return (
+    <div style={{ minHeight:"100vh", background:"#070f1c", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16, fontFamily:"'Sarabun',sans-serif" }}>
+      <div style={{ width:40, height:40, border:"3px solid #1e293b", borderTopColor:"#f59e0b", borderRadius:"50%", animation:"spin .7s linear infinite" }}/>
+      <div style={{ color:"#475569", fontSize:14 }}>กำลังตรวจสอบสิทธิ์...</div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+  return children(user, role);
+}
+
 export default function BuildERPComplete() {
+  return (
+    <LoginRequired>
+      {(user, role) => <BuildERPApp user={user} role={role} />}
+    </LoginRequired>
+  );
+}
+
+function BuildERPApp({ user, role }) {
   // ── Sheets hooks (ถ้าตั้งค่า APPS_SCRIPT_URL แล้วจะดึงจาก Sheets จริง) ──
   const projectsSheet  = useSheetData("projects",  INIT.projects);
   const tasksSheet     = useSheetData("tasks",      INIT.tasks);
@@ -984,6 +1020,13 @@ export default function BuildERPComplete() {
               </button>
             )}
             <span style={{background:"#10b98122",color:"#10b981",border:"1px solid #10b98133",borderRadius:20,padding:"3px 10px",fontSize:11}}>🟢 Sheets</span>
+            <div style={{display:"flex",alignItems:"center",gap:8,background:"#1e293b",borderRadius:20,padding:"3px 12px 3px 4px"}}>
+              {user?.pictureUrl && <img src={user.pictureUrl} style={{width:24,height:24,borderRadius:"50%"}} alt=""/>}
+              <span style={{color:"#e2e8f0",fontSize:12,fontWeight:600}}>{user?.displayName}</span>
+              <span style={{color:"#475569",fontSize:10}}>·</span>
+              <span style={{color:"#f59e0b",fontSize:11}}>{role?.role||"user"}</span>
+            </div>
+            <a href="/api/auth/logout" style={{background:"#ef444422",border:"1px solid #ef444433",borderRadius:20,padding:"3px 10px",color:"#ef4444",fontSize:11,textDecoration:"none"}}>ออก</a>
           </div>
         </div>
 
