@@ -880,34 +880,21 @@ function LoginRequired({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // อ่าน cookie จาก document.cookie
-    const getCookie = (name) => {
-      const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-      return match ? match[2] : null;
-    };
-    const raw = getCookie("builderp_user");
+    // อ่านจาก localStorage
+    const raw = localStorage.getItem("builderp_user");
     if (!raw) { window.location.href = "/login"; return; }
     try {
-      const u = JSON.parse(atob(decodeURIComponent(raw)));
+      const u = JSON.parse(atob(raw));
       setUser(u);
-      // เช็คสิทธิ์จาก Sheets
       fetch(`/api/sheets?action=read&sheet=users`)
         .then(r => r.json())
         .then(json => {
-          if (json.error || !json.data) {
-            // ถ้า Sheets ยังไม่พร้อม ให้เข้าได้เลย
+          if (json.error || !json.data || json.data.length === 0) {
             setRole({ role: "admin", projectIds: "ALL" });
-            setLoading(false);
-            return;
+          } else {
+            const userRow = json.data.find(x => x.lineUserId === u.userId);
+            setRole(userRow || { role: "admin", projectIds: "ALL" });
           }
-          const userRow = json.data.find(x => x.lineUserId === u.userId);
-          if (!userRow) {
-            // ถ้าไม่มีใน Sheets ให้เป็น admin ก่อน
-            setRole({ role: "admin", projectIds: "ALL" });
-            setLoading(false);
-            return;
-          }
-          setRole(userRow);
           setLoading(false);
         })
         .catch(() => {
@@ -1055,7 +1042,7 @@ function BuildERPApp({ user, role }) {
               <span style={{color:"#475569",fontSize:10}}>·</span>
               <span style={{color:"#f59e0b",fontSize:11}}>{role?.role||"user"}</span>
             </div>
-            <a href="/api/auth/logout" style={{background:"#ef444422",border:"1px solid #ef444433",borderRadius:20,padding:"3px 10px",color:"#ef4444",fontSize:11,textDecoration:"none"}}>ออก</a>
+            <a href="#" onClick={e=>{e.preventDefault();localStorage.removeItem("builderp_user");window.location.href="/login";}} style={{background:"#ef444422",border:"1px solid #ef444433",borderRadius:20,padding:"3px 10px",color:"#ef4444",fontSize:11,textDecoration:"none"}}>ออก</a>
           </div>
         </div>
 

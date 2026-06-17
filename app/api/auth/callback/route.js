@@ -3,15 +3,12 @@ import { NextResponse } from "next/server";
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
+  const code   = searchParams.get("code");
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://builderp.vercel.app";
 
-  if (!code) {
-    return NextResponse.redirect(new URL("/login?error=no_code", appUrl));
-  }
+  if (!code) return NextResponse.redirect(new URL("/login?error=no_code", appUrl));
 
   try {
-    // แลก code เป็น access token
     const tokenRes = await fetch("https://api.line.me/oauth2/v2.1/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -25,34 +22,40 @@ export async function GET(request) {
     });
 
     const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) {
-      console.error("Token error:", tokenData);
-      throw new Error("No access token");
-    }
+    if (!tokenData.access_token) throw new Error("No access token: " + JSON.stringify(tokenData));
 
-    // ดึงข้อมูล Profile จาก LINE
     const profileRes = await fetch("https://api.line.me/v2/profile", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
     const profile = await profileRes.json();
 
-    // เข้ารหัส user data
-    const userData = {
+    const userData = JSON.stringify({
       userId:      profile.userId,
       displayName: profile.displayName,
       pictureUrl:  profile.pictureUrl || "",
-    };
-    const encoded = Buffer.from(JSON.stringify(userData)).toString("base64");
-
-    // Redirect พร้อม set cookie ด้วย NextResponse
-    const response = NextResponse.redirect(new URL("/", appUrl));
-    response.cookies.set("builderp_user", encoded, {
-      httpOnly: true,
-      sameSite: "lax",
-      maxAge:   86400,
-      path:     "/",
     });
-    return response;
+    const encoded = Buffer.from(userData).toString("base64");
+
+    // ใช้ HTML page redirect แทน เพื่อ set localStorage
+    const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script>
+  try {
+    localStorage.setItem('builderp_user', '${encoded}');
+    window.location.href = '/';
+  } catch(e) {
+    window.location.href = '/login?error=storage_failed';
+  }
+</script>
+<p>กำลังเข้าสู่ระบบ...</p>
+</body>
+</html>`;
+
+    return new Response(html, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
 
   } catch (err) {
     console.error("LINE auth error:", err.message);
