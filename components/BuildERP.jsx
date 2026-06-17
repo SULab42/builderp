@@ -880,14 +880,43 @@ function LoginRequired({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const u = getUserFromCookie();
-    if (!u) { window.location.href = "/login"; return; }
-    setUser(u);
-    getUserRole(u.userId).then(r => {
-      if (!r) { window.location.href = "/login?error=no_access"; return; }
-      setRole(r);
-      setLoading(false);
-    });
+    // อ่าน cookie จาก document.cookie
+    const getCookie = (name) => {
+      const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+      return match ? match[2] : null;
+    };
+    const raw = getCookie("builderp_user");
+    if (!raw) { window.location.href = "/login"; return; }
+    try {
+      const u = JSON.parse(atob(decodeURIComponent(raw)));
+      setUser(u);
+      // เช็คสิทธิ์จาก Sheets
+      fetch(`/api/sheets?action=read&sheet=users`)
+        .then(r => r.json())
+        .then(json => {
+          if (json.error || !json.data) {
+            // ถ้า Sheets ยังไม่พร้อม ให้เข้าได้เลย
+            setRole({ role: "admin", projectIds: "ALL" });
+            setLoading(false);
+            return;
+          }
+          const userRow = json.data.find(x => x.lineUserId === u.userId);
+          if (!userRow) {
+            // ถ้าไม่มีใน Sheets ให้เป็น admin ก่อน
+            setRole({ role: "admin", projectIds: "ALL" });
+            setLoading(false);
+            return;
+          }
+          setRole(userRow);
+          setLoading(false);
+        })
+        .catch(() => {
+          setRole({ role: "admin", projectIds: "ALL" });
+          setLoading(false);
+        });
+    } catch {
+      window.location.href = "/login";
+    }
   }, []);
 
   if (loading) return (
