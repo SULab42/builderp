@@ -1634,7 +1634,6 @@ function BuildERPApp({ user, role }) {
   const unreadCount = notifications.filter(n=>!n.read).length;
 
   const isAdmin = role?.role === "admin";
-  const isAdmin = role?.role === "admin";
   const navItems = [
     {id:"dashboard",  icon:"📊", label:"Dashboard"},
     {id:"projects",   icon:"🏗️",  label:"โปรเจกต์"},
