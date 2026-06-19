@@ -383,7 +383,7 @@ function AdminPanel({ currentUser, projects }) {
 /* ─────────────────────────────────────────────
    DAILY REPORT
 ───────────────────────────────────────────── */
-function DailyReport({ data, user, role, onAdd, onRemove }) {
+function DailyReport({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
   const [showForm, setShowForm] = useState(false);
   const [filterProj, setFilterProj] = useState("ทั้งหมด");
   const myProjects = role?.projectIds === "ALL" || !role?.projectIds
@@ -391,7 +391,7 @@ function DailyReport({ data, user, role, onAdd, onRemove }) {
     : data.projects.filter(p => role.projectIds.split(",").includes(p.id));
 
   const [form, setForm] = useState({
-    projectId:"", date: new Date().toISOString().slice(0,10),
+    projectId: hideProjectFilter ? (data.projects[0]?.id || "") : "", date: new Date().toISOString().slice(0,10),
     planWork:"", actualWork:"", workerPlan:"", workerActual:"",
     equipment:"", issues:"", weather:"ปกติ", photoNote:"",
   });
@@ -400,12 +400,12 @@ function DailyReport({ data, user, role, onAdd, onRemove }) {
   const submit = () => {
     if (!form.projectId || !form.actualWork) return;
     onAdd({ ...form, reporter: user?.displayName || "ไม่ทราบชื่อ", createdAt: new Date().toISOString() });
-    setForm({ projectId:"", date: new Date().toISOString().slice(0,10), planWork:"", actualWork:"", workerPlan:"", workerActual:"", equipment:"", issues:"", weather:"ปกติ", photoNote:"" });
+    setForm({ projectId: hideProjectFilter ? form.projectId : "", date: new Date().toISOString().slice(0,10), planWork:"", actualWork:"", workerPlan:"", workerActual:"", equipment:"", issues:"", weather:"ปกติ", photoNote:"" });
     setShowForm(false);
   };
 
   const reports = (data.daily||[])
-    .filter(r => filterProj==="ทั้งหมด" || r.projectId===filterProj)
+    .filter(r => hideProjectFilter || filterProj==="ทั้งหมด" || r.projectId===filterProj)
     .sort((a,b) => new Date(b.date) - new Date(a.date));
 
   return (
@@ -418,25 +418,29 @@ function DailyReport({ data, user, role, onAdd, onRemove }) {
         <Btn onClick={()=>setShowForm(!showForm)} color="#3b82f6">+ เขียนรายงานวันนี้</Btn>
       </div>
 
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-        <button onClick={()=>setFilterProj("ทั้งหมด")}
-          style={{ background:filterProj==="ทั้งหมด"?"#3b82f622":"#0d1929", color:filterProj==="ทั้งหมด"?"#3b82f6":"#64748b", border:`1px solid ${filterProj==="ทั้งหมด"?"#3b82f6":"#1e293b"}`, borderRadius:20, padding:"5px 14px", fontSize:12, cursor:"pointer" }}>
-          ทั้งหมด
-        </button>
-        {myProjects.map(p=>(
-          <button key={p.id} onClick={()=>setFilterProj(p.id)}
-            style={{ background:filterProj===p.id?"#3b82f622":"#0d1929", color:filterProj===p.id?"#3b82f6":"#64748b", border:`1px solid ${filterProj===p.id?"#3b82f6":"#1e293b"}`, borderRadius:20, padding:"5px 14px", fontSize:12, cursor:"pointer" }}>
-            {p.name}
+      {!hideProjectFilter && (
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          <button onClick={()=>setFilterProj("ทั้งหมด")}
+            style={{ background:filterProj==="ทั้งหมด"?"#3b82f622":"#0d1929", color:filterProj==="ทั้งหมด"?"#3b82f6":"#64748b", border:`1px solid ${filterProj==="ทั้งหมด"?"#3b82f6":"#1e293b"}`, borderRadius:20, padding:"5px 14px", fontSize:12, cursor:"pointer" }}>
+            ทั้งหมด
           </button>
-        ))}
-      </div>
+          {myProjects.map(p=>(
+            <button key={p.id} onClick={()=>setFilterProj(p.id)}
+              style={{ background:filterProj===p.id?"#3b82f622":"#0d1929", color:filterProj===p.id?"#3b82f6":"#64748b", border:`1px solid ${filterProj===p.id?"#3b82f6":"#1e293b"}`, borderRadius:20, padding:"5px 14px", fontSize:12, cursor:"pointer" }}>
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {showForm && (
         <Card style={{ borderColor:"#3b82f644" }}>
           <h3 style={{ color:"#3b82f6", margin:"0 0 14px", fontSize:14 }}>📝 รายงานประจำวัน · {form.date}</h3>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10, marginBottom:14 }}>
-            <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
-              options={[{value:"",label:"-- เลือก --"},...myProjects.map(p=>({value:p.id,label:p.name}))]} />
+            {!hideProjectFilter && (
+              <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
+                options={[{value:"",label:"-- เลือก --"},...myProjects.map(p=>({value:p.id,label:p.name}))]} />
+            )}
             <Inp label="วันที่" value={form.date} onChange={f("date")} type="date" />
             <Sel label="สภาพอากาศ" value={form.weather} onChange={f("weather")} options={["ปกติ","ฝนตก","แดดจัด","ลมแรง"]} />
           </div>
@@ -528,7 +532,7 @@ function DailyReport({ data, user, role, onAdd, onRemove }) {
 /* ─────────────────────────────────────────────
    3-WEEKS LOOK AHEAD
 ───────────────────────────────────────────── */
-function WeeklyPlan({ data, user, role, onAdd, onRemove }) {
+function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
   const [showForm, setShowForm] = useState(false);
   const myProjects = role?.projectIds === "ALL" || !role?.projectIds
     ? data.projects
@@ -541,7 +545,7 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove }) {
   };
 
   const [form, setForm] = useState({
-    projectId:"", weekStart: getWeekStart(0), activity:"",
+    projectId: hideProjectFilter ? (data.projects[0]?.id || "") : "", weekStart: getWeekStart(0), activity:"",
     planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"",
   });
   const f = k => v => setForm(p=>({...p,[k]:v}));
@@ -549,7 +553,7 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove }) {
   const submit = () => {
     if (!form.projectId || !form.activity) return;
     onAdd({ ...form, createdAt: new Date().toISOString() });
-    setForm({ projectId:"", weekStart: getWeekStart(0), activity:"", planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"" });
+    setForm({ projectId: hideProjectFilter ? form.projectId : "", weekStart: getWeekStart(0), activity:"", planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"" });
     setShowForm(false);
   };
 
@@ -570,8 +574,10 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove }) {
         <Card style={{ borderColor:"#a78bfa44" }}>
           <h3 style={{ color:"#a78bfa", margin:"0 0 14px", fontSize:14 }}>📝 เพิ่มแผนงานสัปดาห์</h3>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
-            <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
-              options={[{value:"",label:"-- เลือก --"},...myProjects.map(p=>({value:p.id,label:p.name}))]} />
+            {!hideProjectFilter && (
+              <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
+                options={[{value:"",label:"-- เลือก --"},...myProjects.map(p=>({value:p.id,label:p.name}))]} />
+            )}
             <Sel label="สัปดาห์" value={form.weekStart} onChange={f("weekStart")}
               options={weeks.map(w=>({value:w.start,label:`${w.label} (${w.start})`}))} />
             <Inp label="กิจกรรม *" value={form.activity} onChange={f("activity")} placeholder="เทพื้นชั้น 4" />
@@ -636,7 +642,7 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove }) {
 /* ─────────────────────────────────────────────
    S-CURVE DASHBOARD
 ───────────────────────────────────────────── */
-function SCurve({ data }) {
+function SCurve({ data, hideProjectPicker }) {
   const [selectedProj, setSelectedProj] = useState(data.projects[0]?.id || "");
   const proj = data.projects.find(p => p.id === selectedProj);
 
@@ -667,8 +673,10 @@ function SCurve({ data }) {
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
         <h2 style={{ color:"#e2e8f0", margin:0, fontSize:18, fontWeight:800 }}>📈 S-Curve Dashboard</h2>
-        <Sel value={selectedProj} onChange={setSelectedProj}
-          options={data.projects.map(p=>({value:p.id,label:p.name}))} />
+        {!hideProjectPicker && (
+          <Sel value={selectedProj} onChange={setSelectedProj}
+            options={data.projects.map(p=>({value:p.id,label:p.name}))} />
+        )}
       </div>
 
       {!proj ? (
@@ -757,24 +765,24 @@ function StatCardSmall({ label, value, color }) {
 /* ─────────────────────────────────────────────
    GANTT / แผนงานโครงการ
 ───────────────────────────────────────────── */
-function GanttPlan({ data, onAdd, onRemove }) {
+function GanttPlan({ data, onAdd, onRemove, hideProjectPicker }) {
   const [showForm, setShowForm] = useState(false);
   const [selectedProj, setSelectedProj] = useState(data.projects[0]?.id || "");
 
   const [form, setForm] = useState({
-    projectId:"", name:"", planStart:"", planEnd:"", actualStart:"", actualEnd:"", progress:"0", critical:"no",
+    projectId: hideProjectPicker ? (data.projects[0]?.id || "") : "", name:"", planStart:"", planEnd:"", actualStart:"", actualEnd:"", progress:"0", critical:"no",
   });
   const f = k => v => setForm(p=>({...p,[k]:v}));
 
   const submit = () => {
     if (!form.projectId || !form.name || !form.planStart || !form.planEnd) return;
     onAdd({ ...form, createdAt: new Date().toISOString() });
-    setForm({ projectId:"", name:"", planStart:"", planEnd:"", actualStart:"", actualEnd:"", progress:"0", critical:"no" });
+    setForm({ projectId: hideProjectPicker ? form.projectId : "", name:"", planStart:"", planEnd:"", actualStart:"", actualEnd:"", progress:"0", critical:"no" });
     setShowForm(false);
   };
 
   const activities = (data.activities||[])
-    .filter(a => a.projectId === selectedProj)
+    .filter(a => hideProjectPicker || a.projectId === selectedProj)
     .sort((a,b) => new Date(a.planStart) - new Date(b.planStart));
 
   // หาช่วงเวลารวมเพื่อ scale timeline
@@ -794,7 +802,9 @@ function GanttPlan({ data, onAdd, onRemove }) {
           <p style={{ color:"#475569", fontSize:12, margin:"4px 0 0" }}>{activities.length} กิจกรรม</p>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <Sel value={selectedProj} onChange={setSelectedProj} options={data.projects.map(p=>({value:p.id,label:p.name}))} />
+          {!hideProjectPicker && (
+            <Sel value={selectedProj} onChange={setSelectedProj} options={data.projects.map(p=>({value:p.id,label:p.name}))} />
+          )}
           <Btn onClick={()=>setShowForm(!showForm)} color="#10b981">+ เพิ่มกิจกรรม</Btn>
         </div>
       </div>
@@ -803,8 +813,10 @@ function GanttPlan({ data, onAdd, onRemove }) {
         <Card style={{ borderColor:"#10b98144" }}>
           <h3 style={{ color:"#10b981", margin:"0 0 14px", fontSize:14 }}>📝 เพิ่มกิจกรรมในแผนงาน</h3>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
-            <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
-              options={[{value:"",label:"-- เลือก --"},...data.projects.map(p=>({value:p.id,label:p.name}))]} />
+            {!hideProjectPicker && (
+              <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
+                options={[{value:"",label:"-- เลือก --"},...data.projects.map(p=>({value:p.id,label:p.name}))]} />
+            )}
             <Inp label="ชื่อกิจกรรม *" value={form.name} onChange={f("name")} placeholder="งานฐานราก" />
             <Inp label="แผนเริ่ม *" value={form.planStart} onChange={f("planStart")} type="date" />
             <Inp label="แผนจบ *" value={form.planEnd} onChange={f("planEnd")} type="date" />
@@ -864,6 +876,112 @@ function GanttPlan({ data, onAdd, onRemove }) {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   PROJECT DETAIL — รวม Daily/Weekly/S-Curve/Gantt ของโปรเจกต์เดียว
+───────────────────────────────────────────── */
+function ProjectDetail({ projectId, data, user, role, hooks, onBack }) {
+  const [subTab, setSubTab] = useState("overview");
+  const proj = data.projects.find(p => p.id === projectId);
+
+  if (!proj) {
+    return (
+      <Card style={{ textAlign:"center", padding:"40px 20px" }}>
+        <div style={{ color:"#475569", fontSize:14, marginBottom:14 }}>ไม่พบโปรเจกต์นี้</div>
+        <Btn onClick={onBack} color="#3b82f6">← กลับหน้าโปรเจกต์</Btn>
+      </Card>
+    );
+  }
+
+  // กรองข้อมูลเฉพาะโปรเจกต์นี้
+  const scopedData = {
+    ...data,
+    projects:   [proj],
+    tasks:      data.tasks.filter(t => t.projectId === projectId),
+    daily:      (data.daily || []).filter(d => d.projectId === projectId),
+    weekly:     (data.weekly || []).filter(w => w.projectId === projectId),
+    progress:   (data.progress || []).filter(p => p.projectId === projectId),
+    activities: (data.activities || []).filter(a => a.projectId === projectId),
+  };
+
+  const subTabs = [
+    { id:"overview", icon:"📊", label:"ภาพรวม" },
+    { id:"daily",    icon:"📝", label:"Daily Report" },
+    { id:"weekly",   icon:"📅", label:"3-Weeks" },
+    { id:"scurve",   icon:"📈", label:"S-Curve" },
+    { id:"gantt",    icon:"📋", label:"แผนงาน" },
+  ];
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      {/* Header */}
+      <div>
+        <button onClick={onBack}
+          style={{ background:"none", border:"none", color:"#64748b", fontSize:13, cursor:"pointer", marginBottom:10, padding:0 }}>
+          ← กลับหน้าโปรเจกต์ทั้งหมด
+        </button>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:10 }}>
+          <div>
+            <h2 style={{ color:"#e2e8f0", margin:0, fontSize:20, fontWeight:800 }}>🏗️ {proj.name}</h2>
+            <p style={{ color:"#475569", fontSize:12, margin:"4px 0 0" }}>👤 {proj.client} · 👷 {proj.manager}</p>
+          </div>
+          <Badge text={proj.status} color={sc(proj.status)} />
+        </div>
+      </div>
+
+      {/* Sub Tabs */}
+      <div style={{ display:"flex", gap:6, flexWrap:"wrap", borderBottom:"1px solid #1e293b", paddingBottom:10 }}>
+        {subTabs.map(t => (
+          <button key={t.id} onClick={()=>setSubTab(t.id)}
+            style={{ display:"flex", alignItems:"center", gap:6, padding:"8px 16px", borderRadius:9, border:`1px solid ${subTab===t.id?"#f59e0b":"#1e293b"}`, background:subTab===t.id?"#f59e0b1a":"#0d1929", color:subTab===t.id?"#f59e0b":"#64748b", fontSize:13, fontWeight:subTab===t.id?700:400, cursor:"pointer" }}>
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Sub Tab Content */}
+      {subTab === "overview" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
+            <StatCardSmall label="ความคืบหน้า" value={`${proj.progress}%`} color="#f59e0b" />
+            <StatCardSmall label="งบประมาณ" value={`฿${fmt(proj.budget)}`} color="#a78bfa" />
+            <StatCardSmall label="ใช้ไปแล้ว" value={`฿${fmt(proj.spent)}`} color={Number(proj.spent)>Number(proj.budget)?"#ef4444":"#10b981"} />
+            <StatCardSmall label="งาน" value={`${proj.tasksDone}/${proj.tasksTotal}`} color="#3b82f6" />
+          </div>
+          <Card>
+            <h3 style={{ color:"#e2e8f0", margin:"0 0 12px", fontSize:14, fontWeight:700 }}>📋 รายละเอียดโปรเจกต์</h3>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, fontSize:13 }}>
+              <span style={{ color:"#64748b" }}>📅 วันเริ่ม</span><span style={{ color:"#e2e8f0" }}>{proj.startDate || "-"}</span>
+              <span style={{ color:"#64748b" }}>🏁 วันสิ้นสุด</span><span style={{ color:"#e2e8f0" }}>{proj.endDate || "-"}</span>
+              <span style={{ color:"#64748b" }}>👷 ผู้จัดการ</span><span style={{ color:"#e2e8f0" }}>{proj.manager || "-"}</span>
+              <span style={{ color:"#64748b" }}>👤 ลูกค้า</span><span style={{ color:"#e2e8f0" }}>{proj.client || "-"}</span>
+            </div>
+          </Card>
+          <Card>
+            <h3 style={{ color:"#e2e8f0", margin:"0 0 12px", fontSize:14, fontWeight:700 }}>🕓 กิจกรรมล่าสุด</h3>
+            {scopedData.daily.length === 0 ? (
+              <div style={{ color:"#334155", fontSize:12, textAlign:"center", padding:"12px 0" }}>ยังไม่มี Daily Report</div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {scopedData.daily.slice(0,3).map(r => (
+                  <div key={r.id} style={{ display:"flex", justifyContent:"space-between", fontSize:12, background:"#070f1c", padding:"8px 12px", borderRadius:6 }}>
+                    <span style={{ color:"#94a3b8" }}>{r.actualWork?.slice(0,40)}...</span>
+                    <span style={{ color:"#475569" }}>{r.date}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {subTab === "daily"  && <DailyReport data={scopedData} user={user} role={role} onAdd={item=>hooks.daily.add({...item, projectId})} onRemove={id=>hooks.daily.remove(id)} hideProjectFilter />}
+      {subTab === "weekly" && <WeeklyPlan data={scopedData} user={user} role={role} onAdd={item=>hooks.weekly.add({...item, projectId})} onRemove={id=>hooks.weekly.remove(id)} />}
+      {subTab === "scurve" && <SCurve data={scopedData} hideProjectPicker />}
+      {subTab === "gantt"  && <GanttPlan data={scopedData} onAdd={item=>hooks.activities.add({...item, projectId})} onRemove={id=>hooks.activities.remove(id)} hideProjectPicker />}
     </div>
   );
 }
@@ -1407,7 +1525,7 @@ ${data.projects.map(p=>`• ${p.name}: ${p.progress}% งบ฿${fmt(p.budget)} 
 /* ─────────────────────────────────────────────
    PROJECTS / TASKS (compact)
 ───────────────────────────────────────────── */
-function Projects({data,onAdd,onRemove}) {
+function Projects({data,onAdd,onRemove,onOpen}) {
   const [showForm,setShowForm]=useState(false);
   const [form,setForm]=useState({name:"",client:"",budget:"",manager:"",startDate:"",endDate:""});
   const f=k=>v=>setForm(p=>({...p,[k]:v}));
@@ -1441,28 +1559,36 @@ function Projects({data,onAdd,onRemove}) {
       )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
         {data.projects.map(p=>(
-          <Card key={p.id}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-              <div>
-                <div style={{color:"#475569",fontSize:10,marginBottom:3}}>{p.id}</div>
-                <div style={{color:"#e2e8f0",fontSize:14,fontWeight:700,lineHeight:1.3}}>{p.name}</div>
-                <div style={{color:"#64748b",fontSize:12,marginTop:3}}>👤 {p.client}</div>
+          <Card key={p.id} style={{ cursor:"pointer", transition:"border-color .2s" }}>
+            <div onClick={()=>onOpen(p.id)}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                <div>
+                  <div style={{color:"#475569",fontSize:10,marginBottom:3}}>{p.id}</div>
+                  <div style={{color:"#e2e8f0",fontSize:14,fontWeight:700,lineHeight:1.3}}>{p.name}</div>
+                  <div style={{color:"#64748b",fontSize:12,marginTop:3}}>👤 {p.client}</div>
+                </div>
+                <Badge text={p.status} color={sc(p.status)}/>
               </div>
-              <Badge text={p.status} color={sc(p.status)}/>
+              <Prog v={Number(p.progress)} color={Number(p.progress)===100?"#10b981":"#f59e0b"}/>
+              <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:12}}>
+                <span style={{color:"#64748b"}}>งาน {p.tasksDone}/{p.tasksTotal}</span>
+                <span style={{color:"#f59e0b",fontWeight:700}}>{p.progress}%</span>
+              </div>
+              <div style={{borderTop:"1px solid #1e293b",marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",fontSize:12,alignItems:"center"}}>
+                <span style={{color:"#64748b"}}>งบ <span style={{color:"#a78bfa"}}>฿{fmt(p.budget)}</span></span>
+                <span style={{color:"#64748b"}}>ใช้ <span style={{color:Number(p.spent)>Number(p.budget)?"#ef4444":"#10b981"}}>฿{fmt(p.spent)}</span></span>
+              </div>
             </div>
-            <Prog v={Number(p.progress)} color={Number(p.progress)===100?"#10b981":"#f59e0b"}/>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:12}}>
-              <span style={{color:"#64748b"}}>งาน {p.tasksDone}/{p.tasksTotal}</span>
-              <span style={{color:"#f59e0b",fontWeight:700}}>{p.progress}%</span>
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+              <button onClick={()=>onOpen(p.id)}
+                style={{flex:1,background:"#3b82f622",border:"1px solid #3b82f644",borderRadius:8,padding:"6px",color:"#3b82f6",fontSize:12,cursor:"pointer",fontFamily:"'Sarabun',sans-serif"}}>
+                📂 เปิดดูรายละเอียด
+              </button>
+              <button onClick={e=>{e.stopPropagation();if(window.confirm(`ลบโปรเจกต์ "${p.name}" ใช่มั้ย?`))onRemove(p.id);}}
+                style={{background:"#ef444411",border:"1px solid #ef444433",borderRadius:8,padding:"6px 14px",color:"#ef4444",fontSize:12,cursor:"pointer",fontFamily:"'Sarabun',sans-serif"}}>
+                🗑️
+              </button>
             </div>
-            <div style={{borderTop:"1px solid #1e293b",marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",fontSize:12,alignItems:"center"}}> 
-              <span style={{color:"#64748b"}}>งบ <span style={{color:"#a78bfa"}}>฿{fmt(p.budget)}</span></span>
-              <span style={{color:"#64748b"}}>ใช้ <span style={{color:Number(p.spent)>Number(p.budget)?"#ef4444":"#10b981"}}>฿{fmt(p.spent)}</span></span>
-            </div>
-            <button onClick={e=>{e.stopPropagation();if(window.confirm(`ลบโปรเจกต์ "${p.name}" ใช่มั้ย?`))onRemove(p.id);}}
-              style={{marginTop:10,width:"100%",background:"#ef444411",border:"1px solid #ef444433",borderRadius:8,padding:"6px",color:"#ef4444",fontSize:12,cursor:"pointer",fontFamily:"'Sarabun',sans-serif"}}>
-              🗑️ ลบโปรเจกต์
-            </button>
           </Card>
         ))}
       </div>
@@ -1608,6 +1734,7 @@ function BuildERPApp({ user, role }) {
   const [notifications, setNotifications] = useState([]);
   const [tab,setTab] = useState("dashboard");
   const [sidebarOpen,setSidebarOpen] = useState(false);
+  const [openProjectId, setOpenProjectId] = useState(null);
 
   // รวมข้อมูลเป็น data object เดียว
   const data = {
@@ -1658,7 +1785,7 @@ function BuildERPApp({ user, role }) {
       </div>
       <nav style={{flex:1,padding:"14px 10px",overflowY:"auto"}}>
         {navItems.map(item=>(
-          <button key={item.id} onClick={()=>{setTab(item.id);setSidebarOpen(false);}}
+          <button key={item.id} onClick={()=>{setTab(item.id);setSidebarOpen(false);setOpenProjectId(null);}}
             style={{width:"100%",display:"flex",alignItems:"center",gap:11,padding:"10px 12px",borderRadius:9,border:"none",cursor:"pointer",marginBottom:3,textAlign:"left",background:tab===item.id?"#f59e0b1a":"transparent",color:tab===item.id?"#f59e0b":"#64748b",position:"relative"}}>
             <span style={{fontSize:17}}>{item.icon}</span>
             <span style={{fontSize:13,fontWeight:tab===item.id?700:400}}>{item.label}</span>
@@ -1734,7 +1861,17 @@ function BuildERPApp({ user, role }) {
         {/* Content */}
         <div style={{flex:1,overflow:"auto",padding:18,paddingBottom:80}}>
           {tab==="dashboard" && <Dashboard data={data}/>}
-          {tab==="projects"  && <Projects data={data} onAdd={item=>projectsSheet.add(item)} onRemove={id=>projectsSheet.remove(id)}/>}
+          {tab==="projects"  && !openProjectId && <Projects data={data} onAdd={item=>projectsSheet.add(item)} onRemove={id=>projectsSheet.remove(id)} onOpen={id=>setOpenProjectId(id)}/>}
+          {tab==="projects"  && openProjectId && (
+            <ProjectDetail
+              projectId={openProjectId}
+              data={data}
+              user={user}
+              role={role}
+              hooks={{ daily: dailySheet, weekly: weeklySheet, activities: activitiesSheet, progress: progressSheet }}
+              onBack={()=>setOpenProjectId(null)}
+            />
+          )}
           {tab==="tasks"     && <Tasks data={data} onAdd={item=>tasksSheet.add(item)} onRemove={id=>tasksSheet.remove(id)}/>}
           {tab==="daily"     && <DailyReport data={data} user={user} role={role} onAdd={item=>dailySheet.add(item)} onRemove={id=>dailySheet.remove(id)}/>}
           {tab==="weekly"    && <WeeklyPlan data={data} user={user} role={role} onAdd={item=>weeklySheet.add(item)} onRemove={id=>weeklySheet.remove(id)}/>}
@@ -1757,7 +1894,7 @@ function BuildERPApp({ user, role }) {
       {/* Mobile Bottom Nav */}
       <div className="mbn" style={{position:"fixed",bottom:0,left:0,right:0,background:"#0a1120",borderTop:"1px solid #1e293b",zIndex:50,justifyContent:"space-around",padding:"6px 0 10px"}}>
         {navItems.map(item=>(
-          <button key={item.id} onClick={()=>setTab(item.id)}
+          <button key={item.id} onClick={()=>{setTab(item.id);setOpenProjectId(null);}}
             style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:1,background:"none",border:"none",cursor:"pointer",padding:"3px 0",color:tab===item.id?"#f59e0b":"#475569",position:"relative"}}>
             <span style={{fontSize:19}}>{item.icon}</span>
             <span style={{fontSize:9}}>{item.label}</span>
