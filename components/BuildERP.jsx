@@ -210,6 +210,39 @@ const ROLE_LABELS = {
   viewer:  { label:"ผู้ดูอย่างเดียว", desc:"ดูอย่างเดียว ไม่แก้ไข",        color:"#64748b" },
 };
 
+function ConnectLineButton({ user, allUsers, onConnect }) {
+  const [open, setOpen] = useState(false);
+  const candidates = allUsers.filter(u => u.status === "awaiting_approval");
+
+  if (!open) return (
+    <button onClick={()=>setOpen(true)}
+      style={{ background:"#3b82f622", border:"1px solid #3b82f644", borderRadius:7, padding:"6px 14px", color:"#3b82f6", fontSize:12, cursor:"pointer", fontWeight:700 }}>
+      🔗 เชื่อมต่อ LINE
+    </button>
+  );
+
+  return (
+    <div style={{ background:"#070f1c", border:"1px solid #3b82f644", borderRadius:8, padding:10, width:"100%", marginTop:6 }}>
+      <div style={{ color:"#94a3b8", fontSize:11, marginBottom:6 }}>
+        เลือกคนที่ Login เข้ามาแล้ว (รออนุมัติ) เพื่อจับคู่กับ "{user.displayName}"
+      </div>
+      {candidates.length === 0 ? (
+        <div style={{ color:"#475569", fontSize:11 }}>ยังไม่มีใคร Login รอจับคู่ — ให้คนนั้น Login ด้วย LINE ก่อน</div>
+      ) : (
+        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+          {candidates.map(c => (
+            <button key={c.id} onClick={()=>{ onConnect(c.lineUserId); setOpen(false); }}
+              style={{ background:"#10b98122", border:"1px solid #10b98144", borderRadius:6, padding:"6px 10px", color:"#10b981", fontSize:12, cursor:"pointer", textAlign:"left" }}>
+              ✅ {c.displayName} ({c.lineUserId?.slice(0,16)}...)
+            </button>
+          ))}
+        </div>
+      )}
+      <button onClick={()=>setOpen(false)} style={{ background:"none", border:"none", color:"#475569", fontSize:11, cursor:"pointer", marginTop:6 }}>ยกเลิก</button>
+    </div>
+  );
+}
+
 function AdminPanel({ currentUser, projects }) {
   const [users, setUsers]       = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -230,10 +263,14 @@ function AdminPanel({ currentUser, projects }) {
   useEffect(() => { loadUsers(); }, []);
 
   const addUser = async () => {
-    if (!form.lineUserId || !form.displayName) return;
+    if (!form.displayName) return; // ไม่บังคับ lineUserId แล้ว — เพิ่มล่วงหน้าได้
     await fetch("/api/sheets", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ action:"create", sheet:"users", data:{ ...form, status:"active" } }),
+      body: JSON.stringify({ action:"create", sheet:"users", data:{
+        ...form,
+        lineUserId: form.lineUserId || "",
+        status: form.lineUserId ? "active" : "pending", // pending = รอคนนี้ login ครั้งแรก
+      } }),
     });
     setForm({ lineUserId:"", displayName:"", role:"foreman", projectIds:"" });
     setShowAdd(false);
@@ -274,16 +311,17 @@ function AdminPanel({ currentUser, projects }) {
 
       {showAdd && (
         <Card style={{ borderColor:"#a78bfa44" }}>
-          <h3 style={{ color:"#a78bfa", margin:"0 0 14px", fontSize:14 }}>📝 เพิ่มผู้ใช้ใหม่</h3>
+          <h3 style={{ color:"#a78bfa", margin:"0 0 14px", fontSize:14 }}>📝 เพิ่มพนักงาน/ผู้ใช้ใหม่</h3>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:10 }}>
-            <Inp label="LINE User ID *" value={form.lineUserId} onChange={v=>setForm(f=>({...f,lineUserId:v}))} placeholder="U375106a0b3c..." />
-            <Inp label="ชื่อที่แสดง *" value={form.displayName} onChange={v=>setForm(f=>({...f,displayName:v}))} />
+            <Inp label="ชื่อที่แสดง *" value={form.displayName} onChange={v=>setForm(f=>({...f,displayName:v}))} placeholder="เช่น สมชาย ใจดี" />
             <Sel label="สิทธิ์ (Role)" value={form.role} onChange={v=>setForm(f=>({...f,role:v}))}
               options={Object.entries(ROLE_LABELS).map(([k,v])=>({ value:k, label:v.label }))} />
             <Inp label="โปรเจกต์ (P001,P002 หรือ ALL)" value={form.projectIds} onChange={v=>setForm(f=>({...f,projectIds:v}))} placeholder="ALL" />
+            <Inp label="LINE User ID (ใส่ทีหลังได้)" value={form.lineUserId} onChange={v=>setForm(f=>({...f,lineUserId:v}))} placeholder="เว้นว่างไว้ก่อนก็ได้" />
           </div>
           <div style={{ color:"#475569", fontSize:11, marginTop:10, lineHeight:1.6 }}>
-            💡 หา LINE User ID ได้จาก Vercel → Logs ตอนที่คนนั้น Login ครั้งแรก (จะ error no_access แต่เห็น ID ใน log)
+            💡 ไม่ต้องรอให้คนนั้น Login ก่อนก็เพิ่มได้เลย — ถ้าเว้น LINE User ID ว่างไว้ ระบบจะตั้งสถานะเป็น "รอเชื่อมต่อ"<br/>
+            พอคนนั้น Login ด้วย LINE ครั้งแรก กดปุ่ม "🔗 เชื่อมต่อ" ที่รายชื่อนี้เพื่อจับคู่กับบัญชี LINE ของเขา
           </div>
           <div style={{ display:"flex", gap:8, marginTop:14 }}>
             <Btn onClick={addUser} color="#10b981">บันทึก ✓</Btn>
@@ -323,34 +361,51 @@ function AdminPanel({ currentUser, projects }) {
                   </div>
                   <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                     <Badge text={roleInfo.label} color={roleInfo.color} />
-                    <Badge text={u.projectIds==="ALL"?"ทุกโปรเจกต์":u.projectIds} color="#64748b" />
-                    <Badge text={u.status==="active"?"ใช้งานได้":"ระงับสิทธิ์"} color={u.status==="active"?"#10b981":"#ef4444"} />
+                    <Badge text={u.projectIds==="ALL"?"ทุกโปรเจกต์":(u.projectIds||"-")} color="#64748b" />
+                    <Badge
+                      text={u.status==="active"?"ใช้งานได้":u.status==="awaiting_approval"?"⏳ รออนุมัติ":u.status==="pending"?"รอเชื่อมต่อ LINE":"ระงับสิทธิ์"}
+                      color={u.status==="active"?"#10b981":u.status==="awaiting_approval"?"#f59e0b":u.status==="pending"?"#3b82f6":"#ef4444"}
+                    />
                   </div>
                 </div>
 
                 {isEditing ? (
                   <div style={{ borderTop:"1px solid #1e293b", marginTop:12, paddingTop:12 }}>
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
-                      <Sel label="เปลี่ยนสิทธิ์" value={u.role} onChange={v=>updateRole(u.id,{role:v})}
+                      <Sel label="เปลี่ยนสิทธิ์" value={u.role||"foreman"} onChange={v=>setUsers(prev=>prev.map(x=>x.id===u.id?{...x,role:v}:x))}
                         options={Object.entries(ROLE_LABELS).map(([k,v])=>({ value:k, label:v.label }))} />
-                      <Inp label="โปรเจกต์" value={u.projectIds} onChange={v=>updateRole(u.id,{projectIds:v})} />
+                      <Inp label="โปรเจกต์" value={u.projectIds||""} onChange={v=>setUsers(prev=>prev.map(x=>x.id===u.id?{...x,projectIds:v}:x))} />
                     </div>
                     <div style={{ display:"flex", gap:8, marginTop:10 }}>
+                      <Btn onClick={()=>updateRole(u.id,{ role:u.role||"foreman", projectIds:u.projectIds||"", status:"active" })} color="#10b981">
+                        {u.status==="awaiting_approval" ? "✅ อนุมัติและบันทึก" : "บันทึก ✓"}
+                      </Btn>
                       <Btn onClick={()=>setEditing(null)} color="#334155">ปิด</Btn>
                     </div>
                   </div>
                 ) : (
                   <div style={{ display:"flex", gap:8, marginTop:12, flexWrap:"wrap" }}>
+                    {u.status === "awaiting_approval" && (
+                      <button onClick={()=>setEditing(u.id)}
+                        style={{ background:"#10b98122", border:"1px solid #10b98144", borderRadius:7, padding:"6px 14px", color:"#10b981", fontSize:12, cursor:"pointer", fontWeight:700 }}>
+                        ✅ อนุมัติเข้าใช้งาน (ตั้งสิทธิ์)
+                      </button>
+                    )}
+                    {u.status === "pending" && (
+                      <ConnectLineButton user={u} allUsers={users} onConnect={(lineId)=>updateRole(u.id,{lineUserId:lineId, status:"active"})} />
+                    )}
                     <button onClick={()=>setEditing(u.id)}
                       style={{ background:"#3b82f622", border:"1px solid #3b82f644", borderRadius:7, padding:"6px 14px", color:"#3b82f6", fontSize:12, cursor:"pointer" }}>
                       ✏️ แก้ไขสิทธิ์
                     </button>
                     {!isSelf && (
                       <>
-                        <button onClick={()=>toggleStatus(u)}
-                          style={{ background: u.status==="active" ? "#f59e0b22" : "#10b98122", border:`1px solid ${u.status==="active"?"#f59e0b44":"#10b98144"}`, borderRadius:7, padding:"6px 14px", color: u.status==="active"?"#f59e0b":"#10b981", fontSize:12, cursor:"pointer" }}>
-                          {u.status==="active" ? "⏸ ระงับสิทธิ์" : "▶ เปิดใช้งาน"}
-                        </button>
+                        {u.status === "active" || u.status === "suspended" ? (
+                          <button onClick={()=>toggleStatus(u)}
+                            style={{ background: u.status==="active" ? "#f59e0b22" : "#10b98122", border:`1px solid ${u.status==="active"?"#f59e0b44":"#10b98144"}`, borderRadius:7, padding:"6px 14px", color: u.status==="active"?"#f59e0b":"#10b981", fontSize:12, cursor:"pointer" }}>
+                            {u.status==="active" ? "⏸ ระงับสิทธิ์" : "▶ เปิดใช้งาน"}
+                          </button>
+                        ) : null}
                         <button onClick={()=>removeUser(u.id, u.displayName)}
                           style={{ background:"#ef444422", border:"1px solid #ef444444", borderRadius:7, padding:"6px 14px", color:"#ef4444", fontSize:12, cursor:"pointer" }}>
                           🗑️ ลบ
@@ -642,32 +697,60 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
 /* ─────────────────────────────────────────────
    S-CURVE DASHBOARD
 ───────────────────────────────────────────── */
-function SCurve({ data, hideProjectPicker }) {
-  const [selectedProj, setSelectedProj] = useState(data.projects[0]?.id || "");
-  const proj = data.projects.find(p => p.id === selectedProj);
+function SCurve({ data, hideProjectPicker, fixedProjectId }) {
+  const [selectedProj, setSelectedProj] = useState(fixedProjectId || data.projects[0]?.id || "");
+  const proj = data.projects.find(p => p.id === (fixedProjectId || selectedProj));
+  const activeProjId = fixedProjectId || selectedProj;
 
-  // สร้างข้อมูล S-Curve จาก progress sheet หรือคำนวณจาก project progress
-  const progressData = (data.progress || []).filter(p => p.projectId === selectedProj)
-    .sort((a,b) => new Date(a.month) - new Date(b.month));
+  // คำนวณ Plan/Actual % จาก weekly_plans (3-Weeks) จัดกลุ่มตามเดือน
+  const weeklyForProj = (data.weekly || []).filter(w => w.projectId === activeProjId);
+  const monthMap = {}; // { "2026-06": { planSum, actualSum, count } }
+  weeklyForProj.forEach(w => {
+    if (!w.weekStart) return;
+    const month = w.weekStart.slice(0,7); // YYYY-MM
+    if (!monthMap[month]) monthMap[month] = { planSum:0, actualSum:0, count:0 };
+    monthMap[month].planSum   += Number(w.planQty||0);
+    monthMap[month].actualSum += Number(w.actualQty||0);
+    monthMap[month].count++;
+  });
 
-  // ถ้าไม่มีข้อมูลใน progress sheet ให้สร้างจาก mock เพื่อแสดงตัวอย่าง
-  const months = progressData.length > 0
-    ? progressData.map(p => p.month)
-    : ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย."];
-  const planValues = progressData.length > 0
-    ? progressData.map(p => Number(p.planPercent||0))
-    : [10,25,40,55,70,85];
-  const actualValues = progressData.length > 0
-    ? progressData.map(p => Number(p.actualPercent||0))
-    : [8,20,35,48,proj?.progress||60,null];
+  const sortedMonths = Object.keys(monthMap).sort();
+  const monthLabel = (m) => {
+    const [y,mo] = m.split("-");
+    const thMonths = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+    return thMonths[Number(mo)-1] || m;
+  };
+
+  // คำนวณ % สะสม (cumulative) จาก weekly_plans จริง
+  let cumPlan = 0, cumActual = 0;
+  const months = [];
+  const planValues = [];
+  const actualValues = [];
+
+  if (sortedMonths.length > 0) {
+    sortedMonths.forEach(m => {
+      const d = monthMap[m];
+      const planPct   = d.planSum   ? Math.min((d.planSum   / (d.count*100)) * 100, 100) : 0;
+      const actualPct = d.planSum   ? Math.min((d.actualSum / d.planSum) * 100, 100) : 0;
+      months.push(monthLabel(m));
+      planValues.push(Math.round(planPct));
+      actualValues.push(Math.round(actualPct));
+    });
+  }
+
+  // ถ้ายังไม่มีข้อมูล 3-Weeks เลย ให้ใช้ progress ของโปรเจกต์เป็น fallback เดียว
+  const hasRealData = sortedMonths.length > 0;
+  const finalMonths = hasRealData ? months : ["ยังไม่มีข้อมูล"];
+  const finalPlan   = hasRealData ? planValues  : [0];
+  const finalActual = hasRealData ? actualValues: [proj?.progress||0];
 
   const maxW = 580, maxH = 220, padL = 40, padB = 30;
-  const stepX = months.length > 1 ? (maxW - padL) / (months.length - 1) : 0;
+  const stepX = finalMonths.length > 1 ? (maxW - padL) / (finalMonths.length - 1) : 0;
   const toY = (v) => maxH - padB - (v/100)*(maxH-padB-10);
   const toX = (i) => padL + i*stepX;
 
-  const planPath = planValues.map((v,i) => `${i===0?"M":"L"} ${toX(i)} ${toY(v)}`).join(" ");
-  const actualPath = actualValues.filter(v=>v!==null).map((v,i) => `${i===0?"M":"L"} ${toX(i)} ${toY(v)}`).join(" ");
+  const planPath = finalPlan.map((v,i) => `${i===0?"M":"L"} ${toX(i)} ${toY(v)}`).join(" ");
+  const actualPath = finalActual.filter(v=>v!==null).map((v,i) => `${i===0?"M":"L"} ${toX(i)} ${toY(v)}`).join(" ");
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
@@ -686,9 +769,9 @@ function SCurve({ data, hideProjectPicker }) {
       ) : (
         <>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
-            <StatCardSmall label="แผนปัจจุบัน" value={`${planValues[planValues.length-1]||0}%`} color="#3b82f6" />
-            <StatCardSmall label="ทำจริงปัจจุบัน" value={`${proj.progress||0}%`} color="#f59e0b" />
-            <StatCardSmall label="ส่วนต่าง" value={`${(proj.progress||0)-(planValues[planValues.length-1]||0)}%`} color={(proj.progress||0)>=(planValues[planValues.length-1]||0)?"#10b981":"#ef4444"} />
+            <StatCardSmall label="แผนปัจจุบัน" value={`${finalPlan[finalPlan.length-1]||0}%`} color="#3b82f6" />
+            <StatCardSmall label="ทำจริงปัจจุบัน (จาก 3-Weeks)" value={`${finalActual[finalActual.length-1]||0}%`} color="#f59e0b" />
+            <StatCardSmall label="ส่วนต่าง" value={`${(finalActual[finalActual.length-1]||0)-(finalPlan[finalPlan.length-1]||0)}%`} color={(finalActual[finalActual.length-1]||0)>=(finalPlan[finalPlan.length-1]||0)?"#10b981":"#ef4444"} />
           </div>
 
           {/* S-Curve Chart */}
@@ -703,7 +786,7 @@ function SCurve({ data, hideProjectPicker }) {
                 </g>
               ))}
               {/* X labels */}
-              {months.map((m,i)=>(
+              {finalMonths.map((m,i)=>(
                 <text key={i} x={toX(i)} y={maxH-padB+18} fill="#475569" fontSize="10" textAnchor="middle">{m}</text>
               ))}
               {/* Plan line */}
@@ -711,8 +794,8 @@ function SCurve({ data, hideProjectPicker }) {
               {/* Actual line */}
               <path d={actualPath} fill="none" stroke="#f59e0b" strokeWidth="2.5"/>
               {/* Dots */}
-              {planValues.map((v,i)=><circle key={"p"+i} cx={toX(i)} cy={toY(v)} r="3" fill="#3b82f6"/>)}
-              {actualValues.map((v,i)=> v!==null && <circle key={"a"+i} cx={toX(i)} cy={toY(v)} r="3" fill="#f59e0b"/>)}
+              {finalPlan.map((v,i)=><circle key={"p"+i} cx={toX(i)} cy={toY(v)} r="3" fill="#3b82f6"/>)}
+              {finalActual.map((v,i)=> v!==null && <circle key={"a"+i} cx={toX(i)} cy={toY(v)} r="3" fill="#f59e0b"/>)}
             </svg>
             <div style={{ display:"flex", gap:16, marginTop:10, justifyContent:"center" }}>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -724,29 +807,29 @@ function SCurve({ data, hideProjectPicker }) {
                 <span style={{ color:"#64748b", fontSize:11 }}>ทำจริง (Actual)</span>
               </div>
             </div>
+            {!hasRealData && (
+              <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:10 }}>
+                💡 ยังไม่มีข้อมูลจาก "3-Weeks" — เพิ่มแผนงานในแท็บ 3-Weeks ก่อน เพื่อให้ S-Curve คำนวณอัตโนมัติ
+              </div>
+            )}
           </Card>
+
 
           {/* Bar Chart รายเดือน */}
           <Card>
             <h3 style={{ color:"#e2e8f0", margin:"0 0 14px", fontSize:14, fontWeight:700 }}>เปรียบเทียบรายเดือน (Bar Chart)</h3>
             <div style={{ display:"flex", gap:16, alignItems:"flex-end", height:160, paddingBottom:20, overflowX:"auto" }}>
-              {months.map((m,i) => (
+              {finalMonths.map((m,i) => (
                 <div key={i} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, minWidth:50 }}>
                   <div style={{ display:"flex", gap:4, alignItems:"flex-end", height:120 }}>
-                    <div style={{ width:16, background:"#3b82f6", borderRadius:"3px 3px 0 0", height:`${(planValues[i]||0)/100*120}px` }} title={`Plan: ${planValues[i]}%`}/>
-                    <div style={{ width:16, background:"#f59e0b", borderRadius:"3px 3px 0 0", height:`${(actualValues[i]||0)/100*120}px` }} title={`Actual: ${actualValues[i]}%`}/>
+                    <div style={{ width:16, background:"#3b82f6", borderRadius:"3px 3px 0 0", height:`${(finalPlan[i]||0)/100*120}px` }} title={`Plan: ${finalPlan[i]}%`}/>
+                    <div style={{ width:16, background:"#f59e0b", borderRadius:"3px 3px 0 0", height:`${(finalActual[i]||0)/100*120}px` }} title={`Actual: ${finalActual[i]}%`}/>
                   </div>
                   <span style={{ color:"#64748b", fontSize:10 }}>{m}</span>
                 </div>
               ))}
             </div>
           </Card>
-
-          {progressData.length === 0 && (
-            <div style={{ color:"#475569", fontSize:11, textAlign:"center" }}>
-              💡 กำลังแสดงข้อมูลตัวอย่าง — เพิ่มข้อมูลจริงใน Google Sheets sheet "progress"
-            </div>
-          )}
         </>
       )}
     </div>
@@ -980,7 +1063,7 @@ function ProjectDetail({ projectId, data, user, role, hooks, onBack }) {
 
       {subTab === "daily"  && <DailyReport data={scopedData} user={user} role={role} onAdd={item=>hooks.daily.add({...item, projectId})} onRemove={id=>hooks.daily.remove(id)} hideProjectFilter />}
       {subTab === "weekly" && <WeeklyPlan data={scopedData} user={user} role={role} onAdd={item=>hooks.weekly.add({...item, projectId})} onRemove={id=>hooks.weekly.remove(id)} />}
-      {subTab === "scurve" && <SCurve data={scopedData} hideProjectPicker />}
+      {subTab === "scurve" && <SCurve data={scopedData} hideProjectPicker fixedProjectId={projectId} />}
       {subTab === "gantt"  && <GanttPlan data={scopedData} onAdd={item=>hooks.activities.add({...item, projectId})} onRemove={id=>hooks.activities.remove(id)} hideProjectPicker />}
     </div>
   );
@@ -1672,9 +1755,9 @@ function LoginRequired({ children }) {
   const [user, setUser]       = useState(null);
   const [role, setRole]       = useState(null);
   const [loading, setLoading] = useState(true);
+  const [denied, setDenied]   = useState(false);
 
   useEffect(() => {
-    // อ่านจาก localStorage
     const raw = localStorage.getItem("builderp_user");
     if (!raw) { window.location.href = "/login"; return; }
     try {
@@ -1682,19 +1765,33 @@ function LoginRequired({ children }) {
       setUser(u);
       fetch(`/api/sheets?action=read&sheet=users`)
         .then(r => r.json())
-        .then(json => {
-          if (json.error || !json.data || json.data.length === 0) {
-            setRole({ role: "admin", projectIds: "ALL" });
-          } else {
-            const userRow = json.data.find(x => x.lineUserId === u.userId);
-            setRole(userRow || { role: "admin", projectIds: "ALL" });
+        .then(async (json) => {
+          const list = (!json.error && json.data) ? json.data : [];
+          const userRow = list.find(x => x.lineUserId === u.userId);
+
+          if (userRow && userRow.status === "active") {
+            setRole(userRow);
+            setLoading(false);
+            return;
           }
+
+          // ไม่มีสิทธิ์ — บันทึก LINE ID ไว้ให้ Admin เห็น (เฉพาะครั้งแรกที่ login ด้วย ID นี้)
+          const alreadyLogged = list.some(x => x.lineUserId === u.userId);
+          if (!alreadyLogged) {
+            try {
+              await fetch("/api/sheets", {
+                method:"POST", headers:{"Content-Type":"application/json"},
+                body: JSON.stringify({ action:"create", sheet:"users", data:{
+                  lineUserId: u.userId, displayName: u.displayName,
+                  role:"", projectIds:"", status:"awaiting_approval",
+                } }),
+              });
+            } catch {}
+          }
+          setDenied(true);
           setLoading(false);
         })
-        .catch(() => {
-          setRole({ role: "admin", projectIds: "ALL" });
-          setLoading(false);
-        });
+        .catch(() => { setDenied(true); setLoading(false); });
     } catch {
       window.location.href = "/login";
     }
@@ -1707,6 +1804,24 @@ function LoginRequired({ children }) {
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
+
+  if (denied) return (
+    <div style={{ minHeight:"100vh", background:"#070f1c", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Sarabun',sans-serif", padding:20 }}>
+      <div style={{ background:"#0d1929", border:"1px solid #1e293b", borderRadius:20, padding:"40px 32px", maxWidth:380, textAlign:"center" }}>
+        <div style={{ fontSize:44, marginBottom:16 }}>⏳</div>
+        <div style={{ color:"#e2e8f0", fontSize:16, fontWeight:700, marginBottom:8 }}>รอ Admin อนุมัติสิทธิ์</div>
+        <div style={{ color:"#64748b", fontSize:13, lineHeight:1.7, marginBottom:20 }}>
+          บัญชี LINE ของคุณ ({user?.displayName}) ยังไม่ได้รับสิทธิ์เข้าใช้งาน<br/>
+          กรุณาติดต่อ Admin เพื่อขอสิทธิ์เข้าใช้งาน
+        </div>
+        <button onClick={()=>{ localStorage.removeItem("builderp_user"); window.location.href="/login"; }}
+          style={{ background:"#ef444422", border:"1px solid #ef444444", borderRadius:10, padding:"10px 20px", color:"#ef4444", fontSize:13, cursor:"pointer", fontFamily:"'Sarabun',sans-serif" }}>
+          ออกจากระบบ
+        </button>
+      </div>
+    </div>
+  );
+
   return children(user, role);
 }
 
@@ -1765,16 +1880,11 @@ function BuildERPApp({ user, role }) {
     {id:"dashboard",  icon:"📊", label:"Dashboard"},
     {id:"projects",   icon:"🏗️",  label:"โปรเจกต์"},
     {id:"tasks",      icon:"✅", label:"ตารางงาน"},
-    {id:"daily",      icon:"📝", label:"Daily Report"},
-    {id:"weekly",     icon:"📅", label:"3-Weeks"},
-    {id:"scurve",     icon:"📈", label:"S-Curve"},
-    {id:"gantt",      icon:"📋", label:"แผนงาน"},
     {id:"materials",  icon:"📦", label:"คลังวัสดุ"},
     {id:"invoices",   icon:"🧾", label:"ใบแจ้งหนี้"},
     {id:"ai",         icon:"🤖", label:"AI Assistant"},
     {id:"notif",      icon:"🔔", label:"แจ้งเตือน", badge:unreadCount},
     ...(isAdmin ? [{id:"admin", icon:"👑", label:"จัดการสิทธิ์"}] : []),
-    ...(isAdmin ? [{id:"admin", icon:"👑", label:"Admin"}] : []),
   ];
 
   const SideNav = () => (
@@ -1873,10 +1983,7 @@ function BuildERPApp({ user, role }) {
             />
           )}
           {tab==="tasks"     && <Tasks data={data} onAdd={item=>tasksSheet.add(item)} onRemove={id=>tasksSheet.remove(id)}/>}
-          {tab==="daily"     && <DailyReport data={data} user={user} role={role} onAdd={item=>dailySheet.add(item)} onRemove={id=>dailySheet.remove(id)}/>}
-          {tab==="weekly"    && <WeeklyPlan data={data} user={user} role={role} onAdd={item=>weeklySheet.add(item)} onRemove={id=>weeklySheet.remove(id)}/>}
-          {tab==="scurve"    && <SCurve data={data}/>}
-          {tab==="gantt"     && <GanttPlan data={data} onAdd={item=>activitiesSheet.add(item)} onRemove={id=>activitiesSheet.remove(id)}/>}
+
           {tab==="materials" && <Materials data={data} onAdd={item=>materialsSheet.add(item)} onRemove={id=>materialsSheet.remove(id)}/>}
           {tab==="invoices"  && <Invoices data={data} onAdd={item=>invoicesSheet.add(item)} onRemove={id=>invoicesSheet.remove(id)}/>}
           {tab==="ai"        && <AIModule data={data}/>}
