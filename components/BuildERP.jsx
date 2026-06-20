@@ -129,7 +129,12 @@ const Sel = ({label,value,onChange,options})=>(
     {label&&<label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>{label}</label>}
     <select value={value} onChange={e=>onChange(e.target.value)}
       style={{width:"100%",background:"#070f1c",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",color:"#e2e8f0",fontSize:13}}>
-      {options.map(o=><option key={o.v||o} value={o.v||o}>{o.l||o}</option>)}
+      {options.map(o=>{
+        const isObj = o && typeof o === "object";
+        const val = isObj ? (o.value ?? o.v ?? "") : o;
+        const lbl = isObj ? (o.label ?? o.l ?? "") : o;
+        return <option key={val} value={val}>{lbl}</option>;
+      })}
     </select>
   </div>
 );
