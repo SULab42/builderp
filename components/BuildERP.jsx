@@ -115,6 +115,17 @@ const INIT = {
    UTILS
 ───────────────────────────────────────────── */
 const fmt = n => new Intl.NumberFormat("th-TH").format(Number(n)||0);
+const fmtDate = (d) => {
+  if (!d) return "-";
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return d; // เผื่อเป็น string แปลกๆ ที่แปลงไม่ได้ ให้แสดงดิบไปก่อน
+    const dd = String(dt.getDate()).padStart(2,"0");
+    const mm = String(dt.getMonth()+1).padStart(2,"0");
+    const yyyy = dt.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  } catch { return d; }
+};
 const sc = s => ({"กำลังดำเนินการ":"#f59e0b","เสร็จสิ้น":"#10b981","เริ่มใหม่":"#3b82f6","กำลังทำ":"#f59e0b","เสร็จแล้ว":"#10b981","รอดำเนินการ":"#64748b","ทำงาน":"#10b981","ลาพัก":"#f59e0b","ชำระแล้ว":"#10b981","รอชำระ":"#f59e0b","ร่าง":"#64748b","ต่ำ":"#10b981","กลาง":"#f59e0b","สูง":"#ef4444"}[s]||"#64748b");
 const uid = p => p+(Date.now()%100000);
 
@@ -707,7 +718,7 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:10 }}>
                 <div>
                   <div style={{ color:"#e2e8f0", fontSize:14, fontWeight:700 }}>{proj?.name || r.projectId}</div>
-                  <div style={{ color:"#475569", fontSize:11 }}>📅 {r.date} · 👤 {r.reporter} · ☀️ {r.weather}</div>
+                  <div style={{ color:"#475569", fontSize:11 }}>📅 {fmtDate(r.date)} · 👤 {r.reporter} · ☀️ {r.weather}</div>
                 </div>
                 <button onClick={()=>{if(window.confirm("ลบรายงานนี้ใช่มั้ย? (ตัวเลขที่บวกเข้า 3-Weeks ไปแล้วจะไม่ถูกย้อนกลับอัตโนมัติ)"))onRemove(r.id);}}
                   style={{ background:"#ef444411", border:"1px solid #ef444433", borderRadius:6, padding:"4px 10px", color:"#ef4444", fontSize:11, cursor:"pointer" }}>🗑️</button>
@@ -764,16 +775,25 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
     return d.toISOString().slice(0,10);
   };
 
+  const WORK_TYPES = {
+    AR: { label:"AR · สถาปัตยกรรม", color:"#3b82f6" },
+    AC: { label:"AC · งานระบบ ACMV", color:"#10b981" },
+    FP: { label:"FP · ป้องกันอัคคีภัย", color:"#ef4444" },
+    EE: { label:"EE · ไฟฟ้า", color:"#f59e0b" },
+    SN: { label:"SN · สุขาภิบาล", color:"#a78bfa" },
+    OT: { label:"อื่นๆ", color:"#64748b" },
+  };
+
   const [form, setForm] = useState({
     projectId: hideProjectFilter ? (data.projects[0]?.id || "") : "", weekStart: getWeekStart(0), activity:"",
-    planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"",
+    workType:"AR", planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"",
   });
   const f = k => v => setForm(p=>({...p,[k]:v}));
 
   const submit = () => {
     if (!form.projectId || !form.activity) return;
     onAdd({ ...form, createdAt: new Date().toISOString() });
-    setForm({ projectId: hideProjectFilter ? form.projectId : "", weekStart: getWeekStart(0), activity:"", planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"" });
+    setForm({ projectId: hideProjectFilter ? form.projectId : "", weekStart: getWeekStart(0), activity:"", workType:"AR", planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"" });
     setShowForm(false);
   };
 
@@ -800,6 +820,8 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
             )}
             <Sel label="สัปดาห์" value={form.weekStart} onChange={f("weekStart")}
               options={weeks.map(w=>({value:w.start,label:`${w.label} (${w.start})`}))} />
+            <Sel label="ประเภทงาน" value={form.workType} onChange={f("workType")}
+              options={Object.entries(WORK_TYPES).map(([k,v])=>({value:k,label:v.label}))} />
             <Inp label="กิจกรรม *" value={form.activity} onChange={f("activity")} placeholder="เทพื้นชั้น 4" />
             <Inp label="แผน (Plan)" value={form.planQty} onChange={f("planQty")} type="number" placeholder="100" />
             <Inp label="ทำจริง (Actual)" value={form.actualQty} onChange={f("actualQty")} type="number" placeholder="0" />
@@ -821,7 +843,7 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
               <div style={{ color:"#e2e8f0", fontSize:14, fontWeight:700 }}>
                 {w.offset===0 ? "🔵" : w.offset===1 ? "🟡" : "⚪"} {w.label}
               </div>
-              <span style={{ color:"#475569", fontSize:11 }}>{w.start}</span>
+              <span style={{ color:"#475569", fontSize:11 }}>{fmtDate(w.start)}</span>
             </div>
             {weekPlans.length === 0 ? (
               <div style={{ color:"#334155", fontSize:12, textAlign:"center", padding:"16px 0" }}>ยังไม่มีแผนงาน</div>
@@ -830,12 +852,14 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
                 {weekPlans.map(p => {
                   const proj = data.projects.find(x=>x.id===p.projectId);
                   const pct = Number(p.planQty) ? Math.round(Number(p.actualQty||0)/Number(p.planQty)*100) : 0;
+                  const wt = WORK_TYPES[p.workType] || WORK_TYPES.OT;
                   return (
                     <div key={p.id} style={{ background:"#070f1c", borderRadius:8, padding:"10px 14px" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, flexWrap:"wrap", gap:6 }}>
-                        <div>
+                        <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                          {p.workType && <Badge text={p.workType} color={wt.color} />}
                           <span style={{ color:"#e2e8f0", fontSize:13, fontWeight:600 }}>{p.activity}</span>
-                          <span style={{ color:"#475569", fontSize:11, marginLeft:8 }}>{proj?.name}</span>
+                          <span style={{ color:"#475569", fontSize:11 }}>{proj?.name}</span>
                         </div>
                         <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                           <Badge text={p.status} color={sc(p.status)} />
@@ -1108,15 +1132,15 @@ function GanttPlan({ data, onAdd, onRemove, hideProjectPicker }) {
                   </div>
                   <div style={{ position:"relative", height:32, background:"#070f1c", borderRadius:6 }}>
                     {/* Plan bar */}
-                    <div style={{ position:"absolute", left:`${planLeft}%`, width:`${planWidth}%`, top:2, height:12, background:"#3b82f644", border:"1px solid #3b82f6", borderRadius:4 }} title={`Plan: ${a.planStart} - ${a.planEnd}`}/>
+                    <div style={{ position:"absolute", left:`${planLeft}%`, width:`${planWidth}%`, top:2, height:12, background:"#3b82f644", border:"1px solid #3b82f6", borderRadius:4 }} title={`Plan: ${fmtDate(a.planStart)} - ${fmtDate(a.planEnd)}`}/>
                     {/* Actual bar */}
                     {actualLeft !== null && (
-                      <div style={{ position:"absolute", left:`${actualLeft}%`, width:`${actualWidth}%`, top:18, height:12, background:"#f59e0b88", border:"1px solid #f59e0b", borderRadius:4 }} title={`Actual: ${a.actualStart} - ${a.actualEnd}`}/>
+                      <div style={{ position:"absolute", left:`${actualLeft}%`, width:`${actualWidth}%`, top:18, height:12, background:"#f59e0b88", border:"1px solid #f59e0b", borderRadius:4 }} title={`Actual: ${fmtDate(a.actualStart)} - ${fmtDate(a.actualEnd)}`}/>
                     )}
                   </div>
                   <div style={{ display:"flex", gap:12, marginTop:4, fontSize:10, color:"#475569" }}>
-                    <span>📘 Plan: {a.planStart} → {a.planEnd}</span>
-                    {a.actualStart && <span>📙 Actual: {a.actualStart} → {a.actualEnd||"กำลังทำ"}</span>}
+                    <span>📘 Plan: {fmtDate(a.planStart)} → {fmtDate(a.planEnd)}</span>
+                    {a.actualStart && <span>📙 Actual: {fmtDate(a.actualStart)} → {a.actualEnd?fmtDate(a.actualEnd):"กำลังทำ"}</span>}
                   </div>
                 </div>
               );
@@ -1194,17 +1218,20 @@ function ProjectDetail({ projectId, data, user, role, hooks, onBack }) {
       {subTab === "overview" && (
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
-            <StatCardSmall label="ความคืบหน้า" value={`${proj.progress}%`} color="#f59e0b" />
+            <StatCardSmall label="ความคืบหน้า" value={`${proj.progress||0}%`} color="#f59e0b" />
             <StatCardSmall label="งบประมาณ" value={`฿${fmt(proj.budget)}`} color="#a78bfa" />
             <StatCardSmall label="ใช้ไปแล้ว" value={`฿${fmt(proj.spent)}`} color={Number(proj.spent)>Number(proj.budget)?"#ef4444":"#10b981"} />
-            <StatCardSmall label="งาน" value={`${proj.tasksDone}/${proj.tasksTotal}`} color="#3b82f6" />
+            <StatCardSmall label="งาน" value={`${scopedData.tasks.filter(t=>t.status==="เสร็จแล้ว").length}/${scopedData.tasks.length}`} color="#3b82f6" />
           </div>
           <Card>
-            <h3 style={{ color:"#e2e8f0", margin:"0 0 12px", fontSize:14, fontWeight:700 }}>📋 รายละเอียดโปรเจกต์</h3>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, fontSize:13 }}>
-              <span style={{ color:"#64748b" }}>📅 วันเริ่ม</span><span style={{ color:"#e2e8f0" }}>{proj.startDate || "-"}</span>
-              <span style={{ color:"#64748b" }}>🏁 วันสิ้นสุด</span><span style={{ color:"#e2e8f0" }}>{proj.endDate || "-"}</span>
+            <h3 style={{ color:"#e2e8f0", margin:"0 0 10px", fontSize:14, fontWeight:700 }}>📋 รายละเอียดโปรเจกต์</h3>
+            <div style={{ display:"grid", gridTemplateColumns:"110px 1fr", gap:"4px 8px", fontSize:13 }}>
+              <span style={{ color:"#64748b" }}>🔖 รหัสโครงการ</span><span style={{ color:"#e2e8f0" }}>{proj.code || "-"}</span>
+              <span style={{ color:"#64748b" }}>📅 วันเริ่ม</span><span style={{ color:"#e2e8f0" }}>{fmtDate(proj.startDate)}</span>
+              <span style={{ color:"#64748b" }}>🏁 วันสิ้นสุด</span><span style={{ color:"#e2e8f0" }}>{fmtDate(proj.endDate)}</span>
+              <span style={{ color:"#64748b" }}>🚜 วันเครื่องเข้า</span><span style={{ color:"#e2e8f0" }}>{fmtDate(proj.mobilizeDate)}</span>
               <span style={{ color:"#64748b" }}>👷 ผู้จัดการ</span><span style={{ color:"#e2e8f0" }}>{proj.manager || "-"}</span>
+              <span style={{ color:"#64748b" }}>👨‍🔧 โฟร์แมน</span><span style={{ color:"#e2e8f0" }}>{proj.foreman || "-"}</span>
               <span style={{ color:"#64748b" }}>👤 ลูกค้า</span><span style={{ color:"#e2e8f0" }}>{proj.client || "-"}</span>
             </div>
           </Card>
@@ -1217,7 +1244,7 @@ function ProjectDetail({ projectId, data, user, role, hooks, onBack }) {
                 {scopedData.daily.slice(0,3).map(r => (
                   <div key={r.id} style={{ display:"flex", justifyContent:"space-between", fontSize:12, background:"#070f1c", padding:"8px 12px", borderRadius:6 }}>
                     <span style={{ color:"#94a3b8" }}>{r.actualWork?.slice(0,40)}...</span>
-                    <span style={{ color:"#475569" }}>{r.date}</span>
+                    <span style={{ color:"#475569" }}>{fmtDate(r.date)}</span>
                   </div>
                 ))}
               </div>
@@ -1272,7 +1299,7 @@ function Dashboard({data}) {
               </div>
             </div>
             <Prog v={Number(p.progress)} color={Number(p.progress)===100?"#10b981":"#f59e0b"}/>
-            <div style={{color:"#334155",fontSize:11,marginTop:3}}>{p.progress}% · 📅 {p.endDate}</div>
+            <div style={{color:"#334155",fontSize:11,marginTop:3}}>{p.progress}% · 📅 {fmtDate(p.endDate)}</div>
           </div>
         ))}
       </Card>
@@ -1466,7 +1493,7 @@ function Invoices({data,onAdd,onRemove}) {
                   <div>
                     <div style={{color:"#e2e8f0",fontSize:14,fontWeight:700}}>{inv.id} <span style={{color:"#64748b",fontWeight:400,fontSize:12}}>· {inv.note}</span></div>
                     <div style={{color:"#64748b",fontSize:12}}>👤 {inv.client} · 🏗️ {proj?.name||"-"}</div>
-                    <div style={{color:"#475569",fontSize:11}}>📅 ออก {inv.issueDate} · ครบ {inv.dueDate}</div>
+                    <div style={{color:"#475569",fontSize:11}}>📅 ออก {fmtDate(inv.issueDate)} · ครบ {fmtDate(inv.dueDate)}</div>
                   </div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
@@ -1775,12 +1802,12 @@ ${data.projects.map(p=>`• ${p.name}: ${p.progress}% งบ฿${fmt(p.budget)} 
 ───────────────────────────────────────────── */
 function Projects({data,onAdd,onRemove,onOpen}) {
   const [showForm,setShowForm]=useState(false);
-  const [form,setForm]=useState({name:"",client:"",budget:"",manager:"",startDate:"",endDate:""});
+  const [form,setForm]=useState({code:"",name:"",client:"",budget:"",manager:"",foreman:"",startDate:"",endDate:"",mobilizeDate:""});
   const f=k=>v=>setForm(p=>({...p,[k]:v}));
   const submit=()=>{
     if(!form.name||!form.budget)return;
-    onAdd({...form,budget:Number(form.budget),spent:0,status:"เริ่มใหม่",progress:0,tasksTotal:0,tasksDone:0,id:uid("P")});
-    setForm({name:"",client:"",budget:"",manager:"",startDate:"",endDate:""});
+    onAdd({...form,budget:Number(form.budget),spent:0,status:"เริ่มใหม่",progress:0,id:uid("P")});
+    setForm({code:"",name:"",client:"",budget:"",manager:"",foreman:"",startDate:"",endDate:"",mobilizeDate:""});
     setShowForm(false);
   };
   return (
@@ -1792,12 +1819,15 @@ function Projects({data,onAdd,onRemove,onOpen}) {
       {showForm&&(
         <Card style={{borderColor:"#f59e0b44"}}>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10}}>
+            <Inp label="รหัสโครงการ" value={form.code} onChange={f("code")} placeholder="เช่น P69015"/>
             <Inp label="ชื่อโปรเจกต์ *" value={form.name} onChange={f("name")}/>
             <Inp label="ลูกค้า" value={form.client} onChange={f("client")}/>
             <Inp label="งบประมาณ (บาท) *" value={form.budget} onChange={f("budget")} type="number"/>
             <Inp label="ผู้จัดการ" value={form.manager} onChange={f("manager")}/>
+            <Inp label="โฟร์แมนผู้ดูแล" value={form.foreman} onChange={f("foreman")}/>
             <Inp label="วันเริ่ม" value={form.startDate} onChange={f("startDate")} type="date"/>
             <Inp label="วันสิ้นสุด" value={form.endDate} onChange={f("endDate")} type="date"/>
+            <Inp label="วันเครื่องเข้า" value={form.mobilizeDate} onChange={f("mobilizeDate")} type="date"/>
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <Btn onClick={submit} color="#10b981">บันทึก ✓</Btn>
@@ -1806,21 +1836,24 @@ function Projects({data,onAdd,onRemove,onOpen}) {
         </Card>
       )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:14}}>
-        {data.projects.map(p=>(
+        {data.projects.map(p=>{
+          const projTasks = data.tasks.filter(t=>t.projectId===p.id);
+          const doneTasks = projTasks.filter(t=>t.status==="เสร็จแล้ว").length;
+          return (
           <Card key={p.id} style={{ cursor:"pointer", transition:"border-color .2s" }}>
             <div onClick={()=>onOpen(p.id)}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
                 <div>
-                  <div style={{color:"#475569",fontSize:10,marginBottom:3}}>{p.id}</div>
+                  <div style={{color:"#475569",fontSize:10,marginBottom:3}}>{p.code || p.id}</div>
                   <div style={{color:"#e2e8f0",fontSize:14,fontWeight:700,lineHeight:1.3}}>{p.name}</div>
-                  <div style={{color:"#64748b",fontSize:12,marginTop:3}}>👤 {p.client}</div>
+                  <div style={{color:"#64748b",fontSize:12,marginTop:3}}>👤 {p.client || "-"}{p.foreman ? ` · 👨‍🔧 ${p.foreman}` : ""}</div>
                 </div>
                 <Badge text={p.status} color={sc(p.status)}/>
               </div>
-              <Prog v={Number(p.progress)} color={Number(p.progress)===100?"#10b981":"#f59e0b"}/>
+              <Prog v={Number(p.progress)||0} color={Number(p.progress)===100?"#10b981":"#f59e0b"}/>
               <div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:12}}>
-                <span style={{color:"#64748b"}}>งาน {p.tasksDone}/{p.tasksTotal}</span>
-                <span style={{color:"#f59e0b",fontWeight:700}}>{p.progress}%</span>
+                <span style={{color:"#64748b"}}>งาน {doneTasks}/{projTasks.length}</span>
+                <span style={{color:"#f59e0b",fontWeight:700}}>{p.progress||0}%</span>
               </div>
               <div style={{borderTop:"1px solid #1e293b",marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",fontSize:12,alignItems:"center"}}>
                 <span style={{color:"#64748b"}}>งบ <span style={{color:"#a78bfa"}}>฿{fmt(p.budget)}</span></span>
@@ -1838,7 +1871,7 @@ function Projects({data,onAdd,onRemove,onOpen}) {
               </button>
             </div>
           </Card>
-        ))}
+        );})}
       </div>
     </div>
   );
