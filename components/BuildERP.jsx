@@ -509,7 +509,9 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
       if (next[wp.id]) {
         delete next[wp.id];
       } else {
-        next[wp.id] = { qty: "", unit: wp.unit || "%" };
+        // ดึงจำนวนที่เหลือจาก 3-Weeks มา prefill ให้ — แก้ไขได้จริงหน้างาน
+        const remaining = Math.max(Number(wp.planQty||0) - Number(wp.actualQty||0), 0);
+        next[wp.id] = { qty: remaining > 0 ? String(remaining) : "", unit: wp.unit || "%" };
       }
       return next;
     });
@@ -637,17 +639,20 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
                             <div style={{ color:"#475569", fontSize:11, marginTop:2 }}>แผน {wp.planQty||0} {wp.unit} · ทำแล้ว {wp.actualQty||0} {wp.unit}</div>
                             <Prog v={pct} color={pct>=100?"#10b981":"#3b82f6"} />
                             {isSel && (
-                              <div onClick={e=>e.stopPropagation()} style={{ display:"flex", alignItems:"center", gap:8, marginTop:10, paddingTop:10, borderTop:"1px solid #1e293b" }}>
-                                <span style={{ color:"#64748b", fontSize:11 }}>ทำได้วันนี้:</span>
-                                <input type="number" value={selectedTasks[wp.id]?.qty||""} onChange={e=>updateTaskQty(wp.id, e.target.value)}
-                                  style={{ width:64, background:"#0d1929", border:"1px solid #f59e0b44", borderRadius:8, padding:"6px 8px", color:"#e2e8f0", fontSize:13 }} />
-                                <select value={selectedTasks[wp.id]?.unit||wp.unit||"%"} onChange={e=>updateTaskUnit(wp.id, e.target.value)}
-                                  style={{ background:"#0d1929", border:"1px solid #334155", borderRadius:8, padding:"6px 8px", color:"#94a3b8", fontSize:12 }}>
-                                  {["%","ตร.ม.","คิว","ม้วน","ท่อน","ชิ้น"].map(u=><option key={u} value={u}>{u}</option>)}
-                                </select>
-                                <span style={{ marginLeft:"auto", color:"#475569", fontSize:11 }}>
-                                  → สะสม <b style={{ color:"#f59e0b" }}>{Number(wp.actualQty||0)+Number(selectedTasks[wp.id]?.qty||0)}</b> {selectedTasks[wp.id]?.unit}
-                                </span>
+                              <div onClick={e=>e.stopPropagation()} style={{ marginTop:10, paddingTop:10, borderTop:"1px solid #1e293b" }}>
+                                <div style={{ color:"#3b82f6", fontSize:10, marginBottom:6 }}>📥 ดึงยอดคงเหลือจาก 3-Weeks มาให้แล้ว — แก้ไขให้ตรงกับที่ทำได้จริงวันนี้</div>
+                                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                                  <span style={{ color:"#64748b", fontSize:11 }}>ทำได้วันนี้:</span>
+                                  <input type="number" value={selectedTasks[wp.id]?.qty||""} onChange={e=>updateTaskQty(wp.id, e.target.value)}
+                                    style={{ width:64, background:"#0d1929", border:"1px solid #f59e0b44", borderRadius:8, padding:"6px 8px", color:"#e2e8f0", fontSize:13 }} />
+                                  <select value={selectedTasks[wp.id]?.unit||wp.unit||"%"} onChange={e=>updateTaskUnit(wp.id, e.target.value)}
+                                    style={{ background:"#0d1929", border:"1px solid #334155", borderRadius:8, padding:"6px 8px", color:"#94a3b8", fontSize:12 }}>
+                                    {["%","ตร.ม.","คิว","ม้วน","ท่อน","ชิ้น"].map(u=><option key={u} value={u}>{u}</option>)}
+                                  </select>
+                                  <span style={{ marginLeft:"auto", color:"#475569", fontSize:11 }}>
+                                    → สะสม <b style={{ color:"#f59e0b" }}>{Number(wp.actualQty||0)+Number(selectedTasks[wp.id]?.qty||0)}</b> {selectedTasks[wp.id]?.unit}
+                                  </span>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -763,8 +768,9 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
 /* ─────────────────────────────────────────────
    3-WEEKS LOOK AHEAD
 ───────────────────────────────────────────── */
-function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
+function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFilter }) {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const myProjects = role?.projectIds === "ALL" || !role?.projectIds
     ? data.projects
     : data.projects.filter(p => role.projectIds.split(",").includes(p.id));
@@ -784,17 +790,33 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
     OT: { label:"อื่นๆ", color:"#64748b" },
   };
 
-  const [form, setForm] = useState({
+  const blankForm = {
     projectId: hideProjectFilter ? (data.projects[0]?.id || "") : "", weekStart: getWeekStart(0), activity:"",
     workType:"AR", planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"",
-  });
+  };
+  const [form, setForm] = useState(blankForm);
   const f = k => v => setForm(p=>({...p,[k]:v}));
 
-  const submit = () => {
+  const resetForm = () => { setForm(blankForm); setEditingId(null); setShowForm(false); };
+
+  const submit = async () => {
     if (!form.projectId || !form.activity) return;
-    onAdd({ ...form, createdAt: new Date().toISOString() });
-    setForm({ projectId: hideProjectFilter ? form.projectId : "", weekStart: getWeekStart(0), activity:"", workType:"AR", planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"" });
-    setShowForm(false);
+    if (editingId) {
+      await onUpdate(editingId, form);
+    } else {
+      await onAdd({ ...form, createdAt: new Date().toISOString() });
+    }
+    resetForm();
+  };
+
+  const startEdit = (p) => {
+    setForm({
+      projectId: p.projectId, weekStart: p.weekStart, activity: p.activity,
+      workType: p.workType || "AR", planQty: p.planQty||"", actualQty: p.actualQty||"",
+      unit: p.unit||"%", status: p.status||"กำลังทำ", note: p.note||"",
+    });
+    setEditingId(p.id);
+    setShowForm(true);
   };
 
   const weeks = [0,1,2].map(i => ({ offset:i, start: getWeekStart(i), label: i===0?"สัปดาห์นี้":i===1?"สัปดาห์หน้า":"อีก 2 สัปดาห์" }));
@@ -807,12 +829,12 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
           <h2 style={{ color:"#e2e8f0", margin:0, fontSize:18, fontWeight:800 }}>📅 3-Weeks Look Ahead</h2>
           <p style={{ color:"#475569", fontSize:12, margin:"4px 0 0" }}>วางแผนงานล่วงหน้า 3 สัปดาห์ · Plan vs Actual</p>
         </div>
-        <Btn onClick={()=>setShowForm(!showForm)} color="#a78bfa">+ เพิ่มแผนงาน</Btn>
+        <Btn onClick={()=>{ if (showForm) resetForm(); else setShowForm(true); }} color="#a78bfa">{showForm ? "ยกเลิก" : "+ เพิ่มแผนงาน"}</Btn>
       </div>
 
       {showForm && (
         <Card style={{ borderColor:"#a78bfa44" }}>
-          <h3 style={{ color:"#a78bfa", margin:"0 0 14px", fontSize:14 }}>📝 เพิ่มแผนงานสัปดาห์</h3>
+          <h3 style={{ color:"#a78bfa", margin:"0 0 14px", fontSize:14 }}>📝 {editingId ? "แก้ไขแผนงาน" : "เพิ่มแผนงานสัปดาห์"}</h3>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
             {!hideProjectFilter && (
               <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
@@ -830,7 +852,7 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
           </div>
           <div style={{ display:"flex", gap:8, marginTop:14 }}>
             <Btn onClick={submit} color="#10b981">บันทึก ✓</Btn>
-            <Btn onClick={()=>setShowForm(false)} color="#334155">ยกเลิก</Btn>
+            <Btn onClick={resetForm} color="#334155">ยกเลิก</Btn>
           </div>
         </Card>
       )}
@@ -863,6 +885,7 @@ function WeeklyPlan({ data, user, role, onAdd, onRemove, hideProjectFilter }) {
                         </div>
                         <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                           <Badge text={p.status} color={sc(p.status)} />
+                          <button onClick={()=>startEdit(p)} style={{ background:"none", border:"none", color:"#3b82f6", fontSize:11, cursor:"pointer" }}>✏️</button>
                           <button onClick={()=>{if(window.confirm("ลบแผนงานนี้ใช่มั้ย?"))onRemove(p.id);}}
                             style={{ background:"none", border:"none", color:"#ef4444", fontSize:11, cursor:"pointer" }}>🗑️</button>
                         </div>
@@ -1037,20 +1060,99 @@ function StatCardSmall({ label, value, color }) {
 /* ─────────────────────────────────────────────
    GANTT / แผนงานโครงการ
 ───────────────────────────────────────────── */
-function GanttPlan({ data, onAdd, onRemove, hideProjectPicker }) {
+function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoCreateWeekly }) {
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [selectedProj, setSelectedProj] = useState(data.projects[0]?.id || "");
 
-  const [form, setForm] = useState({
-    projectId: hideProjectPicker ? (data.projects[0]?.id || "") : "", name:"", planStart:"", planEnd:"", actualStart:"", actualEnd:"", progress:"0", critical:"no",
-  });
+  const blankForm = {
+    projectId: hideProjectPicker ? (data.projects[0]?.id || "") : "",
+    name:"", duration:"", planStart:"", planEnd:"",
+    actualStart:"", actualEnd:"", progress:"0", critical:"no",
+  };
+  const [form, setForm] = useState(blankForm);
   const f = k => v => setForm(p=>({...p,[k]:v}));
 
-  const submit = () => {
+  // คำนวณวันจบจากวันเริ่ม+ระยะเวลา หรือคำนวณระยะเวลาจากวันเริ่ม-วันจบ (ทำงาน 2 ทาง)
+  const setDuration = (val) => {
+    setForm(p => {
+      const next = { ...p, duration: val };
+      if (p.planStart && val) {
+        const start = new Date(p.planStart);
+        const end = new Date(start);
+        end.setDate(end.getDate() + Number(val) - 1);
+        next.planEnd = end.toISOString().slice(0,10);
+      }
+      return next;
+    });
+  };
+  const setPlanStart = (val) => {
+    setForm(p => {
+      const next = { ...p, planStart: val };
+      if (p.duration && val) {
+        const start = new Date(val);
+        const end = new Date(start);
+        end.setDate(end.getDate() + Number(p.duration) - 1);
+        next.planEnd = end.toISOString().slice(0,10);
+      } else if (p.planEnd && val) {
+        const days = Math.round((new Date(p.planEnd) - new Date(val)) / 86400000) + 1;
+        next.duration = days > 0 ? String(days) : p.duration;
+      }
+      return next;
+    });
+  };
+  const setPlanEnd = (val) => {
+    setForm(p => {
+      const next = { ...p, planEnd: val };
+      if (p.planStart && val) {
+        const days = Math.round((new Date(val) - new Date(p.planStart)) / 86400000) + 1;
+        next.duration = days > 0 ? String(days) : p.duration;
+      }
+      return next;
+    });
+  };
+
+  const resetForm = () => { setForm(blankForm); setEditingId(null); setShowForm(false); };
+
+  const submit = async () => {
     if (!form.projectId || !form.name || !form.planStart || !form.planEnd) return;
-    onAdd({ ...form, createdAt: new Date().toISOString() });
-    setForm({ projectId: hideProjectPicker ? form.projectId : "", name:"", planStart:"", planEnd:"", actualStart:"", actualEnd:"", progress:"0", critical:"no" });
-    setShowForm(false);
+
+    if (editingId) {
+      await onUpdate(editingId, form);
+    } else {
+      const newAct = { ...form, createdAt: new Date().toISOString() };
+      await onAdd(newAct);
+      // แตกเข้า 3-Weeks อัตโนมัติ ถ้ากิจกรรมนี้อยู่ในช่วง 3 สัปดาห์ข้างหน้า
+      const today = new Date(); today.setHours(0,0,0,0);
+      const horizon = new Date(today); horizon.setDate(horizon.getDate() + 21);
+      const startD = new Date(form.planStart);
+      if (startD <= horizon && onAutoCreateWeekly) {
+        const weekStart = new Date(startD);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // จันทร์ของสัปดาห์ที่เริ่ม
+        onAutoCreateWeekly({
+          projectId: form.projectId,
+          weekStart: weekStart.toISOString().slice(0,10),
+          activity: form.name,
+          workType: "OT",
+          planQty: "100", actualQty: "0", unit: "%",
+          status: "รอดำเนินการ",
+          note: `แตกอัตโนมัติจากแผนงาน · ${fmtDate(form.planStart)} → ${fmtDate(form.planEnd)}`,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+    resetForm();
+  };
+
+  const startEdit = (a) => {
+    setForm({
+      projectId: a.projectId, name: a.name, duration: a.duration || "",
+      planStart: a.planStart, planEnd: a.planEnd,
+      actualStart: a.actualStart||"", actualEnd: a.actualEnd||"",
+      progress: a.progress||"0", critical: a.critical||"no",
+    });
+    setEditingId(a.id);
+    setShowForm(true);
   };
 
   const activities = (data.activities||[])
@@ -1071,35 +1173,41 @@ function GanttPlan({ data, onAdd, onRemove, hideProjectPicker }) {
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
         <div>
           <h2 style={{ color:"#e2e8f0", margin:0, fontSize:18, fontWeight:800 }}>📋 แผนงานโครงการ (Gantt)</h2>
-          <p style={{ color:"#475569", fontSize:12, margin:"4px 0 0" }}>{activities.length} กิจกรรม</p>
+          <p style={{ color:"#475569", fontSize:12, margin:"4px 0 0" }}>{activities.length} กิจกรรม · เพิ่มแล้วแตกเข้า 3-Weeks อัตโนมัติ</p>
         </div>
         <div style={{ display:"flex", gap:8 }}>
           {!hideProjectPicker && (
             <Sel value={selectedProj} onChange={setSelectedProj} options={data.projects.map(p=>({value:p.id,label:p.name}))} />
           )}
-          <Btn onClick={()=>setShowForm(!showForm)} color="#10b981">+ เพิ่มกิจกรรม</Btn>
+          <Btn onClick={()=>{ if (showForm) resetForm(); else setShowForm(true); }} color="#10b981">{showForm ? "ยกเลิก" : "+ เพิ่มกิจกรรม"}</Btn>
         </div>
       </div>
 
       {showForm && (
         <Card style={{ borderColor:"#10b98144" }}>
-          <h3 style={{ color:"#10b981", margin:"0 0 14px", fontSize:14 }}>📝 เพิ่มกิจกรรมในแผนงาน</h3>
+          <h3 style={{ color:"#10b981", margin:"0 0 14px", fontSize:14 }}>📝 {editingId ? "แก้ไขกิจกรรม" : "เพิ่มกิจกรรมในแผนงาน"}</h3>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
             {!hideProjectPicker && (
               <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
                 options={[{value:"",label:"-- เลือก --"},...data.projects.map(p=>({value:p.id,label:p.name}))]} />
             )}
-            <Inp label="ชื่อกิจกรรม *" value={form.name} onChange={f("name")} placeholder="งานฐานราก" />
-            <Inp label="แผนเริ่ม *" value={form.planStart} onChange={f("planStart")} type="date" />
-            <Inp label="แผนจบ *" value={form.planEnd} onChange={f("planEnd")} type="date" />
+            <Inp label="ชื่องาน (Task Name) *" value={form.name} onChange={f("name")} placeholder="งานฐานราก" />
+            <Inp label="วันเริ่มทำงาน *" value={form.planStart} onChange={setPlanStart} type="date" />
+            <Inp label="ระยะเวลา (วัน)" value={form.duration} onChange={setDuration} type="number" placeholder="10" />
+            <Inp label="วันสิ้นสุด *" value={form.planEnd} onChange={setPlanEnd} type="date" />
             <Inp label="เริ่มจริง" value={form.actualStart} onChange={f("actualStart")} type="date" />
             <Inp label="จบจริง" value={form.actualEnd} onChange={f("actualEnd")} type="date" />
             <Inp label="ความคืบหน้า (%)" value={form.progress} onChange={f("progress")} type="number" />
             <Sel label="Critical Path?" value={form.critical} onChange={f("critical")} options={[{value:"no",label:"ไม่ใช่"},{value:"yes",label:"ใช่"}]} />
           </div>
+          {!editingId && (
+            <div style={{ background:"#10b98111", border:"1px solid #10b98133", borderRadius:8, padding:"8px 12px", color:"#10b981", fontSize:11, marginTop:10 }}>
+              💡 ถ้าวันเริ่มอยู่ในช่วง 3 สัปดาห์ข้างหน้า ระบบจะสร้างรายการใน 3-Weeks ให้อัตโนมัติ (แก้ไขทีหลังได้)
+            </div>
+          )}
           <div style={{ display:"flex", gap:8, marginTop:14 }}>
             <Btn onClick={submit} color="#10b981">บันทึก ✓</Btn>
-            <Btn onClick={()=>setShowForm(false)} color="#334155">ยกเลิก</Btn>
+            <Btn onClick={resetForm} color="#334155">ยกเลิก</Btn>
           </div>
         </Card>
       )}
@@ -1110,43 +1218,65 @@ function GanttPlan({ data, onAdd, onRemove, hideProjectPicker }) {
           <div style={{ color:"#475569", fontSize:14 }}>ยังไม่มีกิจกรรมในแผนงาน</div>
         </Card>
       ) : (
-        <Card style={{ overflowX:"auto" }}>
-          <div style={{ minWidth:600 }}>
-            {activities.map(a => {
-              const planLeft = (dayOffset(a.planStart)/totalDays)*100;
-              const planWidth = (dayDuration(a.planStart,a.planEnd)/totalDays)*100;
-              const actualLeft = a.actualStart ? (dayOffset(a.actualStart)/totalDays)*100 : null;
-              const actualWidth = a.actualStart && a.actualEnd ? (dayDuration(a.actualStart,a.actualEnd)/totalDays)*100 : 0;
-              return (
-                <div key={a.id} style={{ marginBottom:16, paddingBottom:12, borderBottom:"1px solid #0d1929" }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, flexWrap:"wrap", gap:6 }}>
-                    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                      <span style={{ color:"#e2e8f0", fontSize:13, fontWeight:600 }}>{a.name}</span>
+        <>
+          {/* ตารางแบบ MS Project: ลำดับ, ชื่องาน, ระยะเวลา, วันเริ่ม, วันจบ */}
+          <Card style={{ overflowX:"auto", padding:0 }}>
+            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+              <thead>
+                <tr style={{ background:"#070f1c", borderBottom:"1px solid #1e293b" }}>
+                  {["#","ชื่องาน (Task Name)","ระยะเวลา","วันเริ่ม","วันสิ้นสุด","คืบหน้า",""].map((h,i)=>(
+                    <th key={i} style={{ padding:"10px 12px", textAlign:i===0||i===5?"center":"left", color:"#64748b", fontWeight:600, whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {activities.map((a,i) => (
+                  <tr key={a.id} style={{ borderBottom:"1px solid #0d1929" }}>
+                    <td style={{ padding:"10px 12px", textAlign:"center", color:"#475569" }}>{i+1}</td>
+                    <td style={{ padding:"10px 12px" }}>
+                      <span style={{ color:"#e2e8f0", fontWeight:600 }}>{a.name}</span>
                       {a.critical==="yes" && <Badge text="Critical" color="#ef4444" />}
+                    </td>
+                    <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>
+                      {a.duration ? `${a.duration} วัน` : `${Math.round(dayDuration(a.planStart,a.planEnd))} วัน`}
+                    </td>
+                    <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtDate(a.planStart)}</td>
+                    <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtDate(a.planEnd)}</td>
+                    <td style={{ padding:"10px 12px", textAlign:"center", color:"#f59e0b", fontWeight:700 }}>{a.progress||0}%</td>
+                    <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}>
+                      <button onClick={()=>startEdit(a)} style={{ background:"none", border:"none", color:"#3b82f6", fontSize:12, cursor:"pointer", marginRight:8 }}>✏️</button>
+                      <button onClick={()=>{if(window.confirm("ลบกิจกรรมนี้ใช่มั้ย?"))onRemove(a.id);}} style={{ background:"none", border:"none", color:"#ef4444", fontSize:12, cursor:"pointer" }}>🗑️</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+
+          {/* แถบ Gantt ภาพรวม */}
+          <Card style={{ overflowX:"auto" }}>
+            <h3 style={{ color:"#e2e8f0", margin:"0 0 12px", fontSize:13, fontWeight:700 }}>แผนภาพ Gantt</h3>
+            <div style={{ minWidth:600 }}>
+              {activities.map(a => {
+                const planLeft = (dayOffset(a.planStart)/totalDays)*100;
+                const planWidth = (dayDuration(a.planStart,a.planEnd)/totalDays)*100;
+                const actualLeft = a.actualStart ? (dayOffset(a.actualStart)/totalDays)*100 : null;
+                const actualWidth = a.actualStart && a.actualEnd ? (dayDuration(a.actualStart,a.actualEnd)/totalDays)*100 : 0;
+                return (
+                  <div key={a.id} style={{ marginBottom:16, paddingBottom:12, borderBottom:"1px solid #0d1929" }}>
+                    <div style={{ color:"#e2e8f0", fontSize:12, fontWeight:600, marginBottom:6 }}>{a.name}</div>
+                    <div style={{ position:"relative", height:32, background:"#070f1c", borderRadius:6 }}>
+                      <div style={{ position:"absolute", left:`${planLeft}%`, width:`${planWidth}%`, top:2, height:12, background:"#3b82f644", border:"1px solid #3b82f6", borderRadius:4 }} title={`Plan: ${fmtDate(a.planStart)} - ${fmtDate(a.planEnd)}`}/>
+                      {actualLeft !== null && (
+                        <div style={{ position:"absolute", left:`${actualLeft}%`, width:`${actualWidth}%`, top:18, height:12, background:"#f59e0b88", border:"1px solid #f59e0b", borderRadius:4 }} title={`Actual: ${fmtDate(a.actualStart)} - ${fmtDate(a.actualEnd)}`}/>
+                      )}
                     </div>
-                    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                      <span style={{ color:"#64748b", fontSize:11 }}>{a.progress||0}%</span>
-                      <button onClick={()=>{if(window.confirm("ลบกิจกรรมนี้ใช่มั้ย?"))onRemove(a.id);}}
-                        style={{ background:"none", border:"none", color:"#ef4444", fontSize:11, cursor:"pointer" }}>🗑️</button>
-                    </div>
                   </div>
-                  <div style={{ position:"relative", height:32, background:"#070f1c", borderRadius:6 }}>
-                    {/* Plan bar */}
-                    <div style={{ position:"absolute", left:`${planLeft}%`, width:`${planWidth}%`, top:2, height:12, background:"#3b82f644", border:"1px solid #3b82f6", borderRadius:4 }} title={`Plan: ${fmtDate(a.planStart)} - ${fmtDate(a.planEnd)}`}/>
-                    {/* Actual bar */}
-                    {actualLeft !== null && (
-                      <div style={{ position:"absolute", left:`${actualLeft}%`, width:`${actualWidth}%`, top:18, height:12, background:"#f59e0b88", border:"1px solid #f59e0b", borderRadius:4 }} title={`Actual: ${fmtDate(a.actualStart)} - ${fmtDate(a.actualEnd)}`}/>
-                    )}
-                  </div>
-                  <div style={{ display:"flex", gap:12, marginTop:4, fontSize:10, color:"#475569" }}>
-                    <span>📘 Plan: {fmtDate(a.planStart)} → {fmtDate(a.planEnd)}</span>
-                    {a.actualStart && <span>📙 Actual: {fmtDate(a.actualStart)} → {a.actualEnd?fmtDate(a.actualEnd):"กำลังทำ"}</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+                );
+              })}
+            </div>
+          </Card>
+        </>
       )}
     </div>
   );
@@ -1254,9 +1384,9 @@ function ProjectDetail({ projectId, data, user, role, hooks, onBack }) {
       )}
 
       {subTab === "daily"  && <DailyReport data={scopedData} user={user} role={role} onAdd={item=>hooks.daily.add({...item, projectId})} onRemove={id=>hooks.daily.remove(id)} onUpdateWeekly={(id,patch)=>hooks.weekly.update(id,patch)} hideProjectFilter />}
-      {subTab === "weekly" && <WeeklyPlan data={scopedData} user={user} role={role} onAdd={item=>hooks.weekly.add({...item, projectId})} onRemove={id=>hooks.weekly.remove(id)} />}
+      {subTab === "weekly" && <WeeklyPlan data={scopedData} user={user} role={role} onAdd={item=>hooks.weekly.add({...item, projectId})} onUpdate={(id,patch)=>hooks.weekly.update(id,patch)} onRemove={id=>hooks.weekly.remove(id)} />}
       {subTab === "scurve" && <SCurve data={scopedData} hideProjectPicker fixedProjectId={projectId} />}
-      {subTab === "gantt"  && <GanttPlan data={scopedData} onAdd={item=>hooks.activities.add({...item, projectId})} onRemove={id=>hooks.activities.remove(id)} hideProjectPicker />}
+      {subTab === "gantt"  && <GanttPlan data={scopedData} onAdd={item=>hooks.activities.add({...item, projectId})} onUpdate={(id,patch)=>hooks.activities.update(id,patch)} onRemove={id=>hooks.activities.remove(id)} onAutoCreateWeekly={item=>hooks.weekly.add(item)} hideProjectPicker />}
     </div>
   );
 }
@@ -1345,15 +1475,24 @@ function Dashboard({data}) {
 /* ─────────────────────────────────────────────
    MATERIALS
 ───────────────────────────────────────────── */
-function Materials({data,onAdd,onRemove}) {
+function Materials({data,onAdd,onUpdate,onRemove}) {
   const [showForm,setShowForm] = useState(false);
-  const [form,setForm] = useState({name:"",unit:"",qty:"",minStock:"",price:"",supplier:"",location:""});
+  const [editingId,setEditingId] = useState(null);
+  const blankForm = {name:"",unit:"",qty:"",minStock:"",price:"",supplier:"",location:""};
+  const [form,setForm] = useState(blankForm);
   const f = k => v => setForm(p=>({...p,[k]:v}));
+  const resetForm = () => { setForm(blankForm); setEditingId(null); setShowForm(false); };
   const submit = () => {
     if(!form.name||!form.qty) return;
-    onAdd({...form,qty:Number(form.qty),minStock:Number(form.minStock),price:Number(form.price),id:uid("M")});
-    setForm({name:"",unit:"",qty:"",minStock:"",price:"",supplier:"",location:""});
-    setShowForm(false);
+    const payload = {...form,qty:Number(form.qty),minStock:Number(form.minStock),price:Number(form.price)};
+    if (editingId) onUpdate(editingId, payload);
+    else onAdd({...payload, id:uid("M")});
+    resetForm();
+  };
+  const startEdit = (m) => {
+    setForm({name:m.name,unit:m.unit,qty:m.qty,minStock:m.minStock,price:m.price,supplier:m.supplier,location:m.location});
+    setEditingId(m.id);
+    setShowForm(true);
   };
   const totalValue = data.materials.reduce((a,m)=>a+m.qty*m.price,0);
   const lowStock = data.materials.filter(m=>m.qty<=m.minStock).length;
@@ -1364,11 +1503,11 @@ function Materials({data,onAdd,onRemove}) {
           <h2 style={{color:"#e2e8f0",margin:0,fontSize:18,fontWeight:800}}>📦 คลังวัสดุ</h2>
           <p style={{color:"#475569",fontSize:12,margin:"4px 0 0"}}>มูลค่าคงคลัง ฿{fmt(totalValue)} · ต่ำกว่าขั้นต่ำ {lowStock} รายการ</p>
         </div>
-        <Btn onClick={()=>setShowForm(!showForm)}>+ เพิ่มวัสดุ</Btn>
+        <Btn onClick={()=>{ if (showForm) resetForm(); else setShowForm(true); }}>{showForm ? "ยกเลิก" : "+ เพิ่มวัสดุ"}</Btn>
       </div>
       {showForm&&(
         <Card style={{borderColor:"#f59e0b44"}}>
-          <h3 style={{color:"#f59e0b",margin:"0 0 14px",fontSize:14}}>📝 เพิ่มวัสดุใหม่</h3>
+          <h3 style={{color:"#f59e0b",margin:"0 0 14px",fontSize:14}}>📝 {editingId ? "แก้ไขวัสดุ" : "เพิ่มวัสดุใหม่"}</h3>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
             <Inp label="ชื่อวัสดุ *" value={form.name} onChange={f("name")}/>
             <Inp label="หน่วย" value={form.unit} onChange={f("unit")} placeholder="ถุง / เส้น / ม้วน"/>
@@ -1380,7 +1519,7 @@ function Materials({data,onAdd,onRemove}) {
           </div>
           <div style={{display:"flex",gap:8,marginTop:14}}>
             <Btn onClick={submit} color="#10b981">บันทึก ✓</Btn>
-            <Btn onClick={()=>setShowForm(false)} color="#334155">ยกเลิก</Btn>
+            <Btn onClick={resetForm} color="#334155">ยกเลิก</Btn>
           </div>
         </Card>
       )}
@@ -1407,10 +1546,16 @@ function Materials({data,onAdd,onRemove}) {
                   <div style={{color:"#a78bfa",fontSize:14,fontWeight:700}}>฿{fmt(m.price)}/{m.unit}</div>
                   <div style={{color:"#64748b",fontSize:11,marginTop:2}}>รวม ฿{fmt(m.qty*m.price)}</div>
                   {low&&<Badge text="สต็อกต่ำ" color="#ef4444"/>}
-                  <button onClick={()=>{if(window.confirm(`ลบวัสดุ "${m.name}" ใช่มั้ย?`))onRemove(m.id);}}
-                    style={{marginTop:6,background:"#ef444411",border:"1px solid #ef444433",borderRadius:6,padding:"4px 10px",color:"#ef4444",fontSize:11,cursor:"pointer",display:"block",width:"100%"}}>
-                    🗑️ ลบ
-                  </button>
+                  <div style={{display:"flex",gap:6,marginTop:6}}>
+                    <button onClick={()=>startEdit(m)}
+                      style={{flex:1,background:"#3b82f611",border:"1px solid #3b82f633",borderRadius:6,padding:"4px 10px",color:"#3b82f6",fontSize:11,cursor:"pointer"}}>
+                      ✏️ แก้ไข
+                    </button>
+                    <button onClick={()=>{if(window.confirm(`ลบวัสดุ "${m.name}" ใช่มั้ย?`))onRemove(m.id);}}
+                      style={{flex:1,background:"#ef444411",border:"1px solid #ef444433",borderRadius:6,padding:"4px 10px",color:"#ef4444",fontSize:11,cursor:"pointer"}}>
+                      🗑️ ลบ
+                    </button>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -1424,7 +1569,7 @@ function Materials({data,onAdd,onRemove}) {
 /* ─────────────────────────────────────────────
    INVOICES
 ───────────────────────────────────────────── */
-function Invoices({data,onAdd,onRemove}) {
+function Invoices({data,onAdd,onUpdate,onRemove}) {
   const [showForm,setShowForm] = useState(false);
   const [selected,setSelected] = useState(null);
   const [form,setForm] = useState({projectId:"",client:"",note:"",dueDate:"",items:[{desc:"",qty:1,unit:"งวด",price:""}]});
@@ -1510,11 +1655,21 @@ function Invoices({data,onAdd,onRemove}) {
                       <span style={{color:"#e2e8f0"}}>{it.qty} {it.unit} × ฿{fmt(it.price)} = <strong style={{color:"#a78bfa"}}>฿{fmt(it.qty*it.price)}</strong></span>
                     </div>
                   ))}
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
-                    <button onClick={e=>{e.stopPropagation();if(window.confirm(`ลบใบแจ้งหนี้ ${inv.id} ใช่มั้ย?`))onRemove(inv.id);}}
-                      style={{background:"#ef444411",border:"1px solid #ef444433",borderRadius:6,padding:"5px 12px",color:"#ef4444",fontSize:12,cursor:"pointer"}}>
-                      🗑️ ลบใบแจ้งหนี้
-                    </button>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,flexWrap:"wrap",gap:8}}>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{color:"#64748b",fontSize:11}}>สถานะ:</span>
+                      {["ร่าง","รอชำระ","ชำระแล้ว"].map(st=>(
+                        <button key={st} onClick={e=>{e.stopPropagation(); onUpdate(inv.id, {status:st});}}
+                          disabled={inv.status===st}
+                          style={{background:inv.status===st?sc(st)+"33":"#1e293b",border:`1px solid ${inv.status===st?sc(st):"#334155"}`,borderRadius:6,padding:"4px 10px",color:inv.status===st?sc(st):"#94a3b8",fontSize:11,cursor:inv.status===st?"default":"pointer"}}>
+                          {st}
+                        </button>
+                      ))}
+                      <button onClick={e=>{e.stopPropagation();if(window.confirm(`ลบใบแจ้งหนี้ ${inv.id} ใช่มั้ย?`))onRemove(inv.id);}}
+                        style={{background:"#ef444411",border:"1px solid #ef444433",borderRadius:6,padding:"4px 10px",color:"#ef4444",fontSize:11,cursor:"pointer",marginLeft:6}}>
+                        🗑️ ลบ
+                      </button>
+                    </div>
                     <div style={{fontSize:15,fontWeight:800,color:"#a78bfa"}}>รวมทั้งสิ้น ฿{fmt(total)}</div>
                   </div>
                 </div>
@@ -1800,24 +1955,40 @@ ${data.projects.map(p=>`• ${p.name}: ${p.progress}% งบ฿${fmt(p.budget)} 
 /* ─────────────────────────────────────────────
    PROJECTS / TASKS (compact)
 ───────────────────────────────────────────── */
-function Projects({data,onAdd,onRemove,onOpen}) {
+function Projects({data,onAdd,onUpdate,onRemove,onOpen}) {
   const [showForm,setShowForm]=useState(false);
-  const [form,setForm]=useState({code:"",name:"",client:"",budget:"",manager:"",foreman:"",startDate:"",endDate:"",mobilizeDate:""});
+  const [editingId,setEditingId]=useState(null);
+  const blankForm = {code:"",name:"",client:"",budget:"",manager:"",foreman:"",startDate:"",endDate:"",mobilizeDate:""};
+  const [form,setForm]=useState(blankForm);
   const f=k=>v=>setForm(p=>({...p,[k]:v}));
+  const resetForm = () => { setForm(blankForm); setEditingId(null); setShowForm(false); };
   const submit=()=>{
     if(!form.name||!form.budget)return;
-    onAdd({...form,budget:Number(form.budget),spent:0,status:"เริ่มใหม่",progress:0,id:uid("P")});
-    setForm({code:"",name:"",client:"",budget:"",manager:"",foreman:"",startDate:"",endDate:"",mobilizeDate:""});
-    setShowForm(false);
+    if (editingId) {
+      onUpdate(editingId, {...form, budget:Number(form.budget)});
+    } else {
+      onAdd({...form,budget:Number(form.budget),spent:0,status:"เริ่มใหม่",progress:0,id:uid("P")});
+    }
+    resetForm();
+  };
+  const startEdit = (p) => {
+    setForm({
+      code:p.code||"", name:p.name||"", client:p.client||"", budget:p.budget||"",
+      manager:p.manager||"", foreman:p.foreman||"",
+      startDate:p.startDate||"", endDate:p.endDate||"", mobilizeDate:p.mobilizeDate||"",
+    });
+    setEditingId(p.id);
+    setShowForm(true);
   };
   return (
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <h2 style={{color:"#e2e8f0",margin:0,fontSize:18,fontWeight:800}}>🏗️ โปรเจกต์</h2>
-        <Btn onClick={()=>setShowForm(!showForm)}>+ เพิ่มโปรเจกต์</Btn>
+        <Btn onClick={()=>{ if (showForm) resetForm(); else setShowForm(true); }}>{showForm?"ยกเลิก":"+ เพิ่มโปรเจกต์"}</Btn>
       </div>
       {showForm&&(
         <Card style={{borderColor:"#f59e0b44"}}>
+          <h3 style={{color:"#f59e0b",margin:"0 0 12px",fontSize:14}}>{editingId?"แก้ไขโปรเจกต์":"เพิ่มโปรเจกต์ใหม่"}</h3>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10}}>
             <Inp label="รหัสโครงการ" value={form.code} onChange={f("code")} placeholder="เช่น P69015"/>
             <Inp label="ชื่อโปรเจกต์ *" value={form.name} onChange={f("name")}/>
@@ -1831,7 +2002,7 @@ function Projects({data,onAdd,onRemove,onOpen}) {
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <Btn onClick={submit} color="#10b981">บันทึก ✓</Btn>
-            <Btn onClick={()=>setShowForm(false)} color="#334155">ยกเลิก</Btn>
+            <Btn onClick={resetForm} color="#334155">ยกเลิก</Btn>
           </div>
         </Card>
       )}
@@ -1865,6 +2036,10 @@ function Projects({data,onAdd,onRemove,onOpen}) {
                 style={{flex:1,background:"#3b82f622",border:"1px solid #3b82f644",borderRadius:8,padding:"6px",color:"#3b82f6",fontSize:12,cursor:"pointer",fontFamily:"'Sarabun',sans-serif"}}>
                 📂 เปิดดูรายละเอียด
               </button>
+              <button onClick={e=>{e.stopPropagation();startEdit(p);}}
+                style={{background:"#3b82f611",border:"1px solid #3b82f633",borderRadius:8,padding:"6px 12px",color:"#3b82f6",fontSize:12,cursor:"pointer",fontFamily:"'Sarabun',sans-serif"}}>
+                ✏️
+              </button>
               <button onClick={e=>{e.stopPropagation();if(window.confirm(`ลบโปรเจกต์ "${p.name}" ใช่มั้ย?`))onRemove(p.id);}}
                 style={{background:"#ef444411",border:"1px solid #ef444433",borderRadius:8,padding:"6px 14px",color:"#ef4444",fontSize:12,cursor:"pointer",fontFamily:"'Sarabun',sans-serif"}}>
                 🗑️
@@ -1877,16 +2052,29 @@ function Projects({data,onAdd,onRemove,onOpen}) {
   );
 }
 
-function Tasks({data,onAdd,onRemove}) {
+function Tasks({data,onAdd,onUpdate,onRemove}) {
   const [filter,setFilter]=useState("ทั้งหมด");
   const [showForm,setShowForm]=useState(false);
-  const [form,setForm]=useState({title:"",projectId:"",assignee:"",priority:"กลาง",due:"",category:""});
+  const [editingId,setEditingId]=useState(null);
+  const blankForm = {title:"",projectId:"",assignee:"",priority:"กลาง",due:"",category:"",status:"รอดำเนินการ"};
+  const [form,setForm]=useState(blankForm);
   const f=k=>v=>setForm(p=>({...p,[k]:v}));
+  const resetForm = () => { setForm(blankForm); setEditingId(null); setShowForm(false); };
   const submit=()=>{
     if(!form.title||!form.projectId)return;
-    onAdd({...form,status:"รอดำเนินการ",id:uid("T")});
-    setForm({title:"",projectId:"",assignee:"",priority:"กลาง",due:"",category:""});
-    setShowForm(false);
+    if (editingId) onUpdate(editingId, form);
+    else onAdd({...form,id:uid("T")});
+    resetForm();
+  };
+  const startEdit = (t) => {
+    setForm({title:t.title,projectId:t.projectId,assignee:t.assignee||"",priority:t.priority||"กลาง",due:t.due||"",category:t.category||"",status:t.status||"รอดำเนินการ"});
+    setEditingId(t.id);
+    setShowForm(true);
+  };
+  const cycleStatus = (t) => {
+    const order = ["รอดำเนินการ","กำลังทำ","เสร็จแล้ว"];
+    const next = order[(order.indexOf(t.status)+1) % order.length];
+    onUpdate(t.id, {status: next});
   };
   const statuses=["ทั้งหมด","กำลังทำ","รอดำเนินการ","เสร็จแล้ว"];
   const filtered=filter==="ทั้งหมด"?data.tasks:data.tasks.filter(t=>t.status===filter);
@@ -1894,7 +2082,7 @@ function Tasks({data,onAdd,onRemove}) {
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <h2 style={{color:"#e2e8f0",margin:0,fontSize:18,fontWeight:800}}>✅ ตารางงาน</h2>
-        <Btn onClick={()=>setShowForm(!showForm)} color="#3b82f6">+ มอบหมายงาน</Btn>
+        <Btn onClick={()=>{ if (showForm) resetForm(); else setShowForm(true); }} color="#3b82f6">{showForm?"ยกเลิก":"+ มอบหมายงาน"}</Btn>
       </div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
         {statuses.map(s=>(
@@ -1906,17 +2094,19 @@ function Tasks({data,onAdd,onRemove}) {
       </div>
       {showForm&&(
         <Card style={{borderColor:"#3b82f644"}}>
+          <h3 style={{color:"#3b82f6",margin:"0 0 12px",fontSize:14}}>{editingId?"แก้ไขงาน":"มอบหมายงานใหม่"}</h3>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10}}>
             <Inp label="ชื่องาน *" value={form.title} onChange={f("title")}/>
             <Inp label="ผู้รับผิดชอบ" value={form.assignee} onChange={f("assignee")}/>
             <Inp label="ประเภท" value={form.category} onChange={f("category")}/>
             <Inp label="กำหนดส่ง" value={form.due} onChange={f("due")} type="date"/>
-            <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")} options={[{v:"",l:"-- เลือก --"},...data.projects.map(p=>({v:p.id,l:p.name}))]}/>
+            <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")} options={[{value:"",label:"-- เลือก --"},...data.projects.map(p=>({value:p.id,label:p.name}))]}/>
             <Sel label="ความสำคัญ" value={form.priority} onChange={f("priority")} options={["สูง","กลาง","ต่ำ"]}/>
+            {editingId && <Sel label="สถานะ" value={form.status} onChange={f("status")} options={["รอดำเนินการ","กำลังทำ","เสร็จแล้ว"]}/>}
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <Btn onClick={submit} color="#10b981">บันทึก ✓</Btn>
-            <Btn onClick={()=>setShowForm(false)} color="#334155">ยกเลิก</Btn>
+            <Btn onClick={resetForm} color="#334155">ยกเลิก</Btn>
           </div>
         </Card>
       )}
@@ -1926,18 +2116,25 @@ function Tasks({data,onAdd,onRemove}) {
           return (
             <Card key={t.id} style={{padding:"12px 16px"}}>
               <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                <span style={{width:9,height:9,borderRadius:"50%",background:sc(t.status),flexShrink:0}}/>
+                <button onClick={()=>cycleStatus(t)} title="คลิกเพื่อเปลี่ยนสถานะ"
+                  style={{width:9,height:9,borderRadius:"50%",background:sc(t.status),flexShrink:0,border:"none",cursor:"pointer",padding:0}}/>
                 <div style={{flex:1,minWidth:140}}>
                   <div style={{color:"#e2e8f0",fontSize:13,fontWeight:600}}>{t.title}</div>
-                  <div style={{color:"#64748b",fontSize:11,marginTop:2}}>🏗️ {proj?.name||"-"} · 👤 {t.assignee} · 📅 {t.due}</div>
+                  <div style={{color:"#64748b",fontSize:11,marginTop:2}}>🏗️ {proj?.name||"-"} · 👤 {t.assignee} · 📅 {fmtDate(t.due)}</div>
                 </div>
-                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
                   <Badge text={t.category||"-"} color="#475569"/>
                   <Badge text={t.priority} color={sc(t.priority)}/>
-                  <Badge text={t.status} color={sc(t.status)}/>
+                  <button onClick={()=>cycleStatus(t)} style={{background:"none",border:"none",cursor:"pointer",padding:0}}>
+                    <Badge text={t.status} color={sc(t.status)}/>
+                  </button>
+                  <button onClick={()=>startEdit(t)} style={{background:"none",border:"none",color:"#3b82f6",fontSize:12,cursor:"pointer"}}>✏️</button>
+                  <button onClick={()=>{if(window.confirm(`ลบงาน "${t.title}" ใช่มั้ย?`))onRemove(t.id);}}
+                    style={{background:"none",border:"none",color:"#ef4444",fontSize:12,cursor:"pointer"}}>🗑️</button>
                 </div>
               </div>
             </Card>
+
           );
         })}
       </div>
@@ -2169,7 +2366,7 @@ function BuildERPApp({ user, role }) {
         {/* Content */}
         <div style={{flex:1,overflow:"auto",padding:18,paddingBottom:80}}>
           {tab==="dashboard" && <Dashboard data={data}/>}
-          {tab==="projects"  && !openProjectId && <Projects data={data} onAdd={item=>projectsSheet.add(item)} onRemove={id=>projectsSheet.remove(id)} onOpen={id=>setOpenProjectId(id)}/>}
+          {tab==="projects"  && !openProjectId && <Projects data={data} onAdd={item=>projectsSheet.add(item)} onUpdate={(id,patch)=>projectsSheet.update(id,patch)} onRemove={id=>projectsSheet.remove(id)} onOpen={id=>setOpenProjectId(id)}/>}
           {tab==="projects"  && openProjectId && (
             <ProjectDetail
               projectId={openProjectId}
@@ -2180,10 +2377,10 @@ function BuildERPApp({ user, role }) {
               onBack={()=>setOpenProjectId(null)}
             />
           )}
-          {tab==="tasks"     && <Tasks data={data} onAdd={item=>tasksSheet.add(item)} onRemove={id=>tasksSheet.remove(id)}/>}
+          {tab==="tasks"     && <Tasks data={data} onAdd={item=>tasksSheet.add(item)} onUpdate={(id,patch)=>tasksSheet.update(id,patch)} onRemove={id=>tasksSheet.remove(id)}/>}
 
-          {tab==="materials" && <Materials data={data} onAdd={item=>materialsSheet.add(item)} onRemove={id=>materialsSheet.remove(id)}/>}
-          {tab==="invoices"  && <Invoices data={data} onAdd={item=>invoicesSheet.add(item)} onRemove={id=>invoicesSheet.remove(id)}/>}
+          {tab==="materials" && <Materials data={data} onAdd={item=>materialsSheet.add(item)} onUpdate={(id,patch)=>materialsSheet.update(id,patch)} onRemove={id=>materialsSheet.remove(id)}/>}
+          {tab==="invoices"  && <Invoices data={data} onAdd={item=>invoicesSheet.add(item)} onUpdate={(id,patch)=>invoicesSheet.update(id,patch)} onRemove={id=>invoicesSheet.remove(id)}/>}
           {tab==="ai"        && <AIModule data={data}/>}
           {tab==="notif"     && (
             <NotifPanel
