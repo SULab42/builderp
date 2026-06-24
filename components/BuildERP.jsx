@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Fragment } from "react";
 import { getUserFromCookie, getUserRole, ROLES } from "../lib/auth";
 
 /* ─────────────────────────────────────────────
@@ -55,6 +55,33 @@ function useSheetData(sheetName, mockData) {
     setSyncing(false);
   };
 
+  // เพิ่มหลายแถวพร้อมกันในครั้งเดียว — ใช้ตอน Import ไฟล์ (เร็วกว่าเรียก add() วนลูป)
+  const bulkAdd = async (items) => {
+    if (!items || !items.length) return { success: false, count: 0 };
+    setSyncing(true);
+    try {
+      const res  = await fetch("/api/sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action:"bulkCreate", sheet:sheetName, rows:items }),
+      });
+      const json = await res.json();
+      if (json.demo || json.error) {
+        setData(prev => [...prev, ...items.map((it,i)=>({ ...it, id: sheetName[0].toUpperCase()+Date.now()+"-"+i }))]);
+        setSyncing(false);
+        return { success: true, count: items.length, demo: true };
+      } else {
+        await load();
+        setSyncing(false);
+        return { success: true, count: json.count || items.length };
+      }
+    } catch (e) {
+      setData(prev => [...prev, ...items.map((it,i)=>({ ...it, id: sheetName[0].toUpperCase()+Date.now()+"-"+i }))]);
+      setSyncing(false);
+      return { success: true, count: items.length, demo: true };
+    }
+  };
+
   const remove = async (id) => {
     setSyncing(true);
     // ลบใน local state ก่อนให้รู้สึกเร็ว
@@ -96,7 +123,7 @@ function useSheetData(sheetName, mockData) {
     setSyncing(false);
   };
 
-  return { data, syncing, loaded, add, remove, update, reload: load };
+  return { data, syncing, loaded, add, bulkAdd, remove, update, reload: load };
 }
 
 /* ─────────────────────────────────────────────
@@ -128,6 +155,75 @@ const fmtDate = (d) => {
 };
 const sc = s => ({"กำลังดำเนินการ":"#f59e0b","เสร็จสิ้น":"#10b981","เริ่มใหม่":"#3b82f6","กำลังทำ":"#f59e0b","เสร็จแล้ว":"#10b981","รอดำเนินการ":"#64748b","ทำงาน":"#10b981","ลาพัก":"#f59e0b","ชำระแล้ว":"#10b981","รอชำระ":"#f59e0b","ร่าง":"#64748b","ต่ำ":"#10b981","กลาง":"#f59e0b","สูง":"#ef4444"}[s]||"#64748b");
 const uid = p => p+(Date.now()%100000);
+
+// ===== MS Project XML Parser =====
+// แปลง MS Project XML (Save As > XML จาก MS Project) เป็นโครงสร้าง 2 ชั้น: หมวดงาน (category) + รายการงาน
+// OutlineLevel 1 = หมวดงาน, Level 2+ = รายการงาน (รวม Level 3+ เข้า Level 2 ที่ใกล้ที่สุด ตามที่ตกลงกัน)
+function parseMsProjectXml(xmlText) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, "text/xml");
+  const taskNodes = Array.from(doc.getElementsByTagName("Task"));
+
+  const getText = (node, tag) => {
+    const el = node.getElementsByTagName(tag)[0];
+    return el ? el.textContent.trim() : "";
+  };
+
+  // แปลงรูปแบบวันที่ MS Project (เช่น 2026-03-09T08:00:00) เป็น YYYY-MM-DD
+  const toDateStr = (raw) => {
+    if (!raw) return "";
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString().slice(0,10);
+  };
+
+  // แปลง Duration แบบ PT80H0M0S (ชั่วโมง) เป็นจำนวนวัน (สมมติ 8 ชม./วันทำงาน)
+  const toDurationDays = (raw) => {
+    if (!raw) return 1;
+    const match = raw.match(/PT(\d+)H/);
+    if (!match) return 1;
+    const hours = Number(match[1]);
+    return Math.max(Math.round(hours / 8), 1);
+  };
+
+  const tasks = taskNodes.map(node => ({
+    uid: getText(node, "UID"),
+    name: getText(node, "Name"),
+    outlineLevel: Number(getText(node, "OutlineLevel") || "1"),
+    start: toDateStr(getText(node, "Start")),
+    finish: toDateStr(getText(node, "Finish")),
+    duration: toDurationDays(getText(node, "Duration")),
+    percentComplete: Number(getText(node, "PercentComplete") || "0"),
+    summary: getText(node, "Summary") === "1", // true ถ้าเป็นหัวข้อสรุป (มีงานย่อย)
+  })).filter(t => t.name); // ตัดแถวที่ไม่มีชื่อ (เช่น root task UID 0 บางไฟล์)
+
+  // จัดกลุ่ม: เดิน task ตามลำดับ จำหมวดงาน (level 1) ปัจจุบันไว้ แล้ว map ทุก level 2+ เข้าหมวดนั้น
+  let currentCategory = "ไม่มีหมวดงาน";
+  const result = [];
+  tasks.forEach((t, idx) => {
+    if (t.outlineLevel <= 1) {
+      currentCategory = t.name;
+      return;
+    }
+    // ถ้างาน level 2 เป็นหัวข้อสรุป (summary) ที่มีงานย่อย level 3+ ตามมาจริง ให้ข้าม node นี้ไป
+    // เพื่อไม่ให้ซ้ำกับงานย่อยที่จะถูกบันทึกแทน (เช็คจาก task ถัดไปว่ามี outlineLevel มากกว่าหรือไม่)
+    if (t.summary) {
+      const next = tasks[idx + 1];
+      const hasChildren = next && next.outlineLevel > t.outlineLevel;
+      if (hasChildren) return; // ข้าม — งานย่อยจะถูกเก็บแทน ไม่เสียข้อมูล
+    }
+    result.push({
+      category: currentCategory,
+      name: t.name,
+      duration: String(t.duration),
+      planStart: t.start,
+      planEnd: t.finish,
+      progress: String(t.percentComplete),
+    });
+  });
+
+  return result;
+}
 
 /* ─────────────────────────────────────────────
    SHARED COMPONENTS
@@ -1060,14 +1156,19 @@ function StatCardSmall({ label, value, color }) {
 /* ─────────────────────────────────────────────
    GANTT / แผนงานโครงการ
 ───────────────────────────────────────────── */
-function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoCreateWeekly }) {
+function GanttPlan({ data, onAdd, onUpdate, onRemove, onBulkAdd, onBulkCreateWeekly, hideProjectPicker, onAutoCreateWeekly }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [selectedProj, setSelectedProj] = useState(data.projects[0]?.id || "");
+  const [showImport, setShowImport] = useState(false);
+  const [importPreview, setImportPreview] = useState(null); // [{category,name,duration,planStart,planEnd,progress}]
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+  const fileInputRef = useRef(null);
 
   const blankForm = {
     projectId: hideProjectPicker ? (data.projects[0]?.id || "") : "",
-    name:"", duration:"", planStart:"", planEnd:"",
+    category:"", name:"", duration:"", planStart:"", planEnd:"",
     actualStart:"", actualEnd:"", progress:"0", critical:"no",
   };
   const [form, setForm] = useState(blankForm);
@@ -1114,39 +1215,43 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoC
 
   const resetForm = () => { setForm(blankForm); setEditingId(null); setShowForm(false); };
 
+  // สร้างรายการ 3-Weeks อัตโนมัติให้ 1 กิจกรรม (ใช้ทั้งตอนเพิ่มมือ และตอน import)
+  const buildWeeklyFromActivity = (act) => {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const horizon = new Date(today); horizon.setDate(horizon.getDate() + 21);
+    const startD = new Date(act.planStart);
+    if (!(startD <= horizon)) return null;
+    const weekStart = new Date(startD);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // จันทร์ของสัปดาห์ที่เริ่ม
+    return {
+      projectId: act.projectId,
+      weekStart: weekStart.toISOString().slice(0,10),
+      activity: act.name,
+      workType: "OT",
+      planQty: "100", actualQty: "0", unit: "%",
+      status: "รอดำเนินการ",
+      note: `แตกอัตโนมัติจากแผนงาน · ${fmtDate(act.planStart)} → ${fmtDate(act.planEnd)}`,
+      createdAt: new Date().toISOString(),
+    };
+  };
+
   const submit = async () => {
     if (!form.projectId || !form.name || !form.planStart || !form.planEnd) return;
 
     if (editingId) {
       await onUpdate(editingId, form);
     } else {
-      const newAct = { ...form, createdAt: new Date().toISOString() };
+      const newAct = { ...form, isCategory:"no", createdAt: new Date().toISOString() };
       await onAdd(newAct);
-      // แตกเข้า 3-Weeks อัตโนมัติ ถ้ากิจกรรมนี้อยู่ในช่วง 3 สัปดาห์ข้างหน้า
-      const today = new Date(); today.setHours(0,0,0,0);
-      const horizon = new Date(today); horizon.setDate(horizon.getDate() + 21);
-      const startD = new Date(form.planStart);
-      if (startD <= horizon && onAutoCreateWeekly) {
-        const weekStart = new Date(startD);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // จันทร์ของสัปดาห์ที่เริ่ม
-        onAutoCreateWeekly({
-          projectId: form.projectId,
-          weekStart: weekStart.toISOString().slice(0,10),
-          activity: form.name,
-          workType: "OT",
-          planQty: "100", actualQty: "0", unit: "%",
-          status: "รอดำเนินการ",
-          note: `แตกอัตโนมัติจากแผนงาน · ${fmtDate(form.planStart)} → ${fmtDate(form.planEnd)}`,
-          createdAt: new Date().toISOString(),
-        });
-      }
+      const weeklyItem = onAutoCreateWeekly && buildWeeklyFromActivity(newAct);
+      if (weeklyItem) onAutoCreateWeekly(weeklyItem);
     }
     resetForm();
   };
 
   const startEdit = (a) => {
     setForm({
-      projectId: a.projectId, name: a.name, duration: a.duration || "",
+      projectId: a.projectId, category: a.category||"", name: a.name, duration: a.duration || "",
       planStart: a.planStart, planEnd: a.planEnd,
       actualStart: a.actualStart||"", actualEnd: a.actualEnd||"",
       progress: a.progress||"0", critical: a.critical||"no",
@@ -1155,9 +1260,69 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoC
     setShowForm(true);
   };
 
+  // ───── Import MS Project XML ─────
+  const handleFileSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportError("");
+    try {
+      const text = await file.text();
+      const parsed = parseMsProjectXml(text);
+      if (!parsed.length) {
+        setImportError("ไม่พบรายการงานในไฟล์ — ตรวจสอบว่า Export จาก MS Project เป็น XML ถูกต้องแล้ว");
+        return;
+      }
+      setImportPreview(parsed);
+    } catch (err) {
+      setImportError("อ่านไฟล์ไม่สำเร็จ: " + err.message + " — ตรวจสอบว่าเป็นไฟล์ XML ที่ Export จาก MS Project");
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importPreview || !importPreview.length) return;
+    const projId = hideProjectPicker ? (data.projects[0]?.id || "") : selectedProj;
+    if (!projId) { setImportError("กรุณาเลือกโปรเจกต์ก่อน import"); return; }
+
+    setImporting(true);
+    const activitiesPayload = importPreview.map(t => ({
+      projectId: projId, category: t.category, name: t.name, duration: t.duration,
+      planStart: t.planStart, planEnd: t.planEnd, actualStart:"", actualEnd:"",
+      progress: t.progress, critical:"no", isCategory:"no",
+    }));
+
+    if (onBulkAdd) {
+      await onBulkAdd(activitiesPayload);
+    } else {
+      for (const a of activitiesPayload) await onAdd(a);
+    }
+
+    // แตกเข้า 3-Weeks อัตโนมัติสำหรับงานที่อยู่ใน 3 สัปดาห์ข้างหน้า
+    const weeklyItems = activitiesPayload
+      .map(a => buildWeeklyFromActivity(a))
+      .filter(Boolean);
+    if (weeklyItems.length) {
+      if (onBulkCreateWeekly) await onBulkCreateWeekly(weeklyItems);
+      else if (onAutoCreateWeekly) for (const w of weeklyItems) await onAutoCreateWeekly(w);
+    }
+
+    setImporting(false);
+    setImportPreview(null);
+    setShowImport(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const activities = (data.activities||[])
     .filter(a => hideProjectPicker || a.projectId === selectedProj)
     .sort((a,b) => new Date(a.planStart) - new Date(b.planStart));
+
+  // จัดกลุ่มเป็น 2 ชั้น: { หมวดงาน: [รายการงาน...] }
+  const grouped = activities.reduce((acc, a) => {
+    const cat = a.category || "ไม่มีหมวดงาน";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(a);
+    return acc;
+  }, {});
+  const categoryNames = Object.keys(grouped);
 
   // หาช่วงเวลารวมเพื่อ scale timeline
   const allDates = activities.flatMap(a => [a.planStart, a.planEnd].filter(Boolean));
@@ -1168,20 +1333,85 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoC
   const dayOffset = (dateStr) => dateStr ? (new Date(dateStr) - minDate) / 86400000 : 0;
   const dayDuration = (s,e) => s && e ? Math.max((new Date(e) - new Date(s)) / 86400000, 1) : 0;
 
+  let rowCounter = 0;
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
         <div>
           <h2 style={{ color:"#e2e8f0", margin:0, fontSize:18, fontWeight:800 }}>📋 แผนงานโครงการ (Gantt)</h2>
-          <p style={{ color:"#475569", fontSize:12, margin:"4px 0 0" }}>{activities.length} กิจกรรม · เพิ่มแล้วแตกเข้า 3-Weeks อัตโนมัติ</p>
+          <p style={{ color:"#475569", fontSize:12, margin:"4px 0 0" }}>{activities.length} กิจกรรม · {categoryNames.length} หมวดงาน · เพิ่มแล้วแตกเข้า 3-Weeks อัตโนมัติ</p>
         </div>
-        <div style={{ display:"flex", gap:8 }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           {!hideProjectPicker && (
             <Sel value={selectedProj} onChange={setSelectedProj} options={data.projects.map(p=>({value:p.id,label:p.name}))} />
           )}
-          <Btn onClick={()=>{ if (showForm) resetForm(); else setShowForm(true); }} color="#10b981">{showForm ? "ยกเลิก" : "+ เพิ่มกิจกรรม"}</Btn>
+          <Btn onClick={()=>{ setShowImport(!showImport); setShowForm(false); }} color="#3b82f6">{showImport ? "ยกเลิก" : "📥 Import MS Project"}</Btn>
+          <Btn onClick={()=>{ if (showForm) resetForm(); else { setShowForm(true); setShowImport(false); } }} color="#10b981">{showForm ? "ยกเลิก" : "+ เพิ่มกิจกรรม"}</Btn>
         </div>
       </div>
+
+      {showImport && (
+        <Card style={{ borderColor:"#3b82f644" }}>
+          <h3 style={{ color:"#3b82f6", margin:"0 0 10px", fontSize:14 }}>📥 Import จาก MS Project</h3>
+          <div style={{ color:"#64748b", fontSize:12, lineHeight:1.7, marginBottom:14 }}>
+            ขั้นตอน: เปิดไฟล์ .mpp ใน MS Project → <b style={{color:"#94a3b8"}}>File → Save As → เลือกชนิดไฟล์ "XML"</b> → อัพโหลดไฟล์ .xml ที่ได้ที่นี่<br/>
+            ระบบจะอ่านโครงสร้าง 2 ชั้น (หมวดงาน → รายการงาน) ให้อัตโนมัติ งานที่ลึกกว่า 2 ชั้นจะถูกรวมเข้าเป็นรายการงานเช่นกัน ไม่มีงานหาย
+          </div>
+
+          {!hideProjectPicker && !importPreview && (
+            <div style={{ marginBottom:12 }}>
+              <Sel label="นำเข้าสู่โปรเจกต์ *" value={selectedProj} onChange={setSelectedProj}
+                options={data.projects.map(p=>({value:p.id,label:p.name}))} />
+            </div>
+          )}
+
+          {!importPreview ? (
+            <div>
+              <input ref={fileInputRef} type="file" accept=".xml" onChange={handleFileSelect}
+                style={{ color:"#94a3b8", fontSize:13, fontFamily:"'Sarabun',sans-serif" }} />
+              {importError && (
+                <div style={{ background:"#ef444411", border:"1px solid #ef444444", borderRadius:8, padding:"10px 14px", color:"#ef4444", fontSize:12, marginTop:10 }}>
+                  ❌ {importError}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div style={{ background:"#10b98111", border:"1px solid #10b98144", borderRadius:8, padding:"10px 14px", color:"#10b981", fontSize:12, marginBottom:12 }}>
+                ✅ พบ {importPreview.length} รายการงาน ใน {new Set(importPreview.map(t=>t.category)).size} หมวดงาน — ตรวจสอบก่อนนำเข้าจริง
+              </div>
+              <div style={{ maxHeight:300, overflowY:"auto", border:"1px solid #1e293b", borderRadius:8 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                  <thead>
+                    <tr style={{ background:"#070f1c" }}>
+                      {["หมวดงาน","ชื่องาน","ระยะ(วัน)","เริ่ม","จบ","%"].map(h=>(
+                        <th key={h} style={{ padding:"6px 10px", textAlign:"left", color:"#64748b", position:"sticky", top:0, background:"#070f1c" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importPreview.map((t,i)=>(
+                      <tr key={i} style={{ borderTop:"1px solid #0d1929" }}>
+                        <td style={{ padding:"6px 10px", color:"#a78bfa" }}>{t.category}</td>
+                        <td style={{ padding:"6px 10px", color:"#e2e8f0" }}>{t.name}</td>
+                        <td style={{ padding:"6px 10px", color:"#64748b" }}>{t.duration}</td>
+                        <td style={{ padding:"6px 10px", color:"#64748b", whiteSpace:"nowrap" }}>{fmtDate(t.planStart)}</td>
+                        <td style={{ padding:"6px 10px", color:"#64748b", whiteSpace:"nowrap" }}>{fmtDate(t.planEnd)}</td>
+                        <td style={{ padding:"6px 10px", color:"#f59e0b" }}>{t.progress}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display:"flex", gap:8, marginTop:14 }}>
+                <Btn onClick={confirmImport} color="#10b981">{importing ? "กำลังนำเข้า..." : `✅ ยืนยัน Import ${importPreview.length} รายการ`}</Btn>
+                <Btn onClick={()=>{ setImportPreview(null); if (fileInputRef.current) fileInputRef.current.value=""; }} color="#334155">เลือกไฟล์ใหม่</Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {showForm && (
         <Card style={{ borderColor:"#10b98144" }}>
@@ -1191,6 +1421,7 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoC
               <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")}
                 options={[{value:"",label:"-- เลือก --"},...data.projects.map(p=>({value:p.id,label:p.name}))]} />
             )}
+            <Inp label="หมวดงาน" value={form.category} onChange={f("category")} placeholder="เช่น งานสถาปัตยกรรม" />
             <Inp label="ชื่องาน (Task Name) *" value={form.name} onChange={f("name")} placeholder="งานฐานราก" />
             <Inp label="วันเริ่มทำงาน *" value={form.planStart} onChange={setPlanStart} type="date" />
             <Inp label="ระยะเวลา (วัน)" value={form.duration} onChange={setDuration} type="number" placeholder="10" />
@@ -1219,7 +1450,7 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoC
         </Card>
       ) : (
         <>
-          {/* ตารางแบบ MS Project: ลำดับ, ชื่องาน, ระยะเวลา, วันเริ่ม, วันจบ */}
+          {/* ตารางแบบ MS Project 2 ชั้น: หมวดงาน → ชื่องาน, ระยะเวลา, วันเริ่ม, วันจบ */}
           <Card style={{ overflowX:"auto", padding:0 }}>
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
               <thead>
@@ -1230,25 +1461,49 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoC
                 </tr>
               </thead>
               <tbody>
-                {activities.map((a,i) => (
-                  <tr key={a.id} style={{ borderBottom:"1px solid #0d1929" }}>
-                    <td style={{ padding:"10px 12px", textAlign:"center", color:"#475569" }}>{i+1}</td>
-                    <td style={{ padding:"10px 12px" }}>
-                      <span style={{ color:"#e2e8f0", fontWeight:600 }}>{a.name}</span>
-                      {a.critical==="yes" && <Badge text="Critical" color="#ef4444" />}
-                    </td>
-                    <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>
-                      {a.duration ? `${a.duration} วัน` : `${Math.round(dayDuration(a.planStart,a.planEnd))} วัน`}
-                    </td>
-                    <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtDate(a.planStart)}</td>
-                    <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtDate(a.planEnd)}</td>
-                    <td style={{ padding:"10px 12px", textAlign:"center", color:"#f59e0b", fontWeight:700 }}>{a.progress||0}%</td>
-                    <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}>
-                      <button onClick={()=>startEdit(a)} style={{ background:"none", border:"none", color:"#3b82f6", fontSize:12, cursor:"pointer", marginRight:8 }}>✏️</button>
-                      <button onClick={()=>{if(window.confirm("ลบกิจกรรมนี้ใช่มั้ย?"))onRemove(a.id);}} style={{ background:"none", border:"none", color:"#ef4444", fontSize:12, cursor:"pointer" }}>🗑️</button>
-                    </td>
-                  </tr>
-                ))}
+                {categoryNames.map(catName => {
+                  const catTasks = grouped[catName];
+                  const catStart = catTasks.reduce((min,t)=> !min || new Date(t.planStart) < new Date(min) ? t.planStart : min, null);
+                  const catEnd   = catTasks.reduce((max,t)=> !max || new Date(t.planEnd) > new Date(max) ? t.planEnd : max, null);
+                  const catProgress = Math.round(catTasks.reduce((s,t)=>s+Number(t.progress||0),0) / catTasks.length);
+                  return (
+                    <Fragment key={catName}>
+                      {/* แถวหมวดงาน */}
+                      <tr style={{ background:"#1e293b66" }}>
+                        <td style={{ padding:"8px 12px", textAlign:"center", color:"#64748b" }}></td>
+                        <td style={{ padding:"8px 12px", color:"#a78bfa", fontWeight:800 }}>📂 {catName}</td>
+                        <td style={{ padding:"8px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{Math.round(dayDuration(catStart,catEnd))} วัน</td>
+                        <td style={{ padding:"8px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtDate(catStart)}</td>
+                        <td style={{ padding:"8px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtDate(catEnd)}</td>
+                        <td style={{ padding:"8px 12px", textAlign:"center", color:"#a78bfa", fontWeight:700 }}>{catProgress}%</td>
+                        <td></td>
+                      </tr>
+                      {/* แถวรายการงานในหมวดนี้ */}
+                      {catTasks.map(a => {
+                        rowCounter++;
+                        return (
+                          <tr key={a.id} style={{ borderBottom:"1px solid #0d1929" }}>
+                            <td style={{ padding:"10px 12px", textAlign:"center", color:"#475569" }}>{rowCounter}</td>
+                            <td style={{ padding:"10px 12px", paddingLeft:28 }}>
+                              <span style={{ color:"#e2e8f0", fontWeight:600 }}>{a.name}</span>
+                              {a.critical==="yes" && <Badge text="Critical" color="#ef4444" />}
+                            </td>
+                            <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>
+                              {a.duration ? `${a.duration} วัน` : `${Math.round(dayDuration(a.planStart,a.planEnd))} วัน`}
+                            </td>
+                            <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtDate(a.planStart)}</td>
+                            <td style={{ padding:"10px 12px", color:"#94a3b8", whiteSpace:"nowrap" }}>{fmtDate(a.planEnd)}</td>
+                            <td style={{ padding:"10px 12px", textAlign:"center", color:"#f59e0b", fontWeight:700 }}>{a.progress||0}%</td>
+                            <td style={{ padding:"10px 12px", whiteSpace:"nowrap" }}>
+                              <button onClick={()=>startEdit(a)} style={{ background:"none", border:"none", color:"#3b82f6", fontSize:12, cursor:"pointer", marginRight:8 }}>✏️</button>
+                              <button onClick={()=>{if(window.confirm("ลบกิจกรรมนี้ใช่มั้ย?"))onRemove(a.id);}} style={{ background:"none", border:"none", color:"#ef4444", fontSize:12, cursor:"pointer" }}>🗑️</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </Card>
@@ -1257,23 +1512,28 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, hideProjectPicker, onAutoC
           <Card style={{ overflowX:"auto" }}>
             <h3 style={{ color:"#e2e8f0", margin:"0 0 12px", fontSize:13, fontWeight:700 }}>แผนภาพ Gantt</h3>
             <div style={{ minWidth:600 }}>
-              {activities.map(a => {
-                const planLeft = (dayOffset(a.planStart)/totalDays)*100;
-                const planWidth = (dayDuration(a.planStart,a.planEnd)/totalDays)*100;
-                const actualLeft = a.actualStart ? (dayOffset(a.actualStart)/totalDays)*100 : null;
-                const actualWidth = a.actualStart && a.actualEnd ? (dayDuration(a.actualStart,a.actualEnd)/totalDays)*100 : 0;
-                return (
-                  <div key={a.id} style={{ marginBottom:16, paddingBottom:12, borderBottom:"1px solid #0d1929" }}>
-                    <div style={{ color:"#e2e8f0", fontSize:12, fontWeight:600, marginBottom:6 }}>{a.name}</div>
-                    <div style={{ position:"relative", height:32, background:"#070f1c", borderRadius:6 }}>
-                      <div style={{ position:"absolute", left:`${planLeft}%`, width:`${planWidth}%`, top:2, height:12, background:"#3b82f644", border:"1px solid #3b82f6", borderRadius:4 }} title={`Plan: ${fmtDate(a.planStart)} - ${fmtDate(a.planEnd)}`}/>
-                      {actualLeft !== null && (
-                        <div style={{ position:"absolute", left:`${actualLeft}%`, width:`${actualWidth}%`, top:18, height:12, background:"#f59e0b88", border:"1px solid #f59e0b", borderRadius:4 }} title={`Actual: ${fmtDate(a.actualStart)} - ${fmtDate(a.actualEnd)}`}/>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              {categoryNames.map(catName => (
+                <div key={catName} style={{ marginBottom:18 }}>
+                  <div style={{ color:"#a78bfa", fontSize:12, fontWeight:800, marginBottom:8 }}>📂 {catName}</div>
+                  {grouped[catName].map(a => {
+                    const planLeft = (dayOffset(a.planStart)/totalDays)*100;
+                    const planWidth = (dayDuration(a.planStart,a.planEnd)/totalDays)*100;
+                    const actualLeft = a.actualStart ? (dayOffset(a.actualStart)/totalDays)*100 : null;
+                    const actualWidth = a.actualStart && a.actualEnd ? (dayDuration(a.actualStart,a.actualEnd)/totalDays)*100 : 0;
+                    return (
+                      <div key={a.id} style={{ marginBottom:14, paddingBottom:10, borderBottom:"1px solid #0d1929", paddingLeft:14 }}>
+                        <div style={{ color:"#e2e8f0", fontSize:12, fontWeight:600, marginBottom:6 }}>{a.name}</div>
+                        <div style={{ position:"relative", height:32, background:"#070f1c", borderRadius:6 }}>
+                          <div style={{ position:"absolute", left:`${planLeft}%`, width:`${planWidth}%`, top:2, height:12, background:"#3b82f644", border:"1px solid #3b82f6", borderRadius:4 }} title={`Plan: ${fmtDate(a.planStart)} - ${fmtDate(a.planEnd)}`}/>
+                          {actualLeft !== null && (
+                            <div style={{ position:"absolute", left:`${actualLeft}%`, width:`${actualWidth}%`, top:18, height:12, background:"#f59e0b88", border:"1px solid #f59e0b", borderRadius:4 }} title={`Actual: ${fmtDate(a.actualStart)} - ${fmtDate(a.actualEnd)}`}/>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           </Card>
         </>
@@ -1386,7 +1646,7 @@ function ProjectDetail({ projectId, data, user, role, hooks, onBack }) {
       {subTab === "daily"  && <DailyReport data={scopedData} user={user} role={role} onAdd={item=>hooks.daily.add({...item, projectId})} onRemove={id=>hooks.daily.remove(id)} onUpdateWeekly={(id,patch)=>hooks.weekly.update(id,patch)} hideProjectFilter />}
       {subTab === "weekly" && <WeeklyPlan data={scopedData} user={user} role={role} onAdd={item=>hooks.weekly.add({...item, projectId})} onUpdate={(id,patch)=>hooks.weekly.update(id,patch)} onRemove={id=>hooks.weekly.remove(id)} />}
       {subTab === "scurve" && <SCurve data={scopedData} hideProjectPicker fixedProjectId={projectId} />}
-      {subTab === "gantt"  && <GanttPlan data={scopedData} onAdd={item=>hooks.activities.add({...item, projectId})} onUpdate={(id,patch)=>hooks.activities.update(id,patch)} onRemove={id=>hooks.activities.remove(id)} onAutoCreateWeekly={item=>hooks.weekly.add(item)} hideProjectPicker />}
+      {subTab === "gantt"  && <GanttPlan data={scopedData} onAdd={item=>hooks.activities.add({...item, projectId})} onUpdate={(id,patch)=>hooks.activities.update(id,patch)} onRemove={id=>hooks.activities.remove(id)} onBulkAdd={items=>hooks.activities.bulkAdd(items.map(it=>({...it, projectId})))} onBulkCreateWeekly={items=>hooks.weekly.bulkAdd(items)} onAutoCreateWeekly={item=>hooks.weekly.add(item)} hideProjectPicker />}
     </div>
   );
 }
