@@ -1216,11 +1216,13 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, onBulkAdd, onBulkCreateWee
   const resetForm = () => { setForm(blankForm); setEditingId(null); setShowForm(false); };
 
   // สร้างรายการ 3-Weeks อัตโนมัติให้ 1 กิจกรรม (ใช้ทั้งตอนเพิ่มมือ และตอน import)
+  // ใช้สถานะความคืบหน้าจริงตัดสิน ไม่ใช้ช่วงวันที่ — งานที่ยังไม่เสร็จ (progress < 100%) ควรอยู่ใน 3-Weeks
+  // ไม่ว่าวันเริ่มจะอยู่ไกลแค่ไหนจากวันนี้ก็ตาม (ตามที่ตกลงกัน เพื่อไม่ให้พลาดงานที่ import มาจากแผนเก่า)
   const buildWeeklyFromActivity = (act) => {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const horizon = new Date(today); horizon.setDate(horizon.getDate() + 21);
-    const startD = new Date(act.planStart);
-    if (!(startD <= horizon)) return null;
+    const progressNum = Number(act.progress || 0);
+    if (progressNum >= 100) return null; // งานเสร็จสมบูรณ์แล้ว ไม่ต้องสร้างซ้ำ
+
+    const startD = act.planStart ? new Date(act.planStart) : new Date();
     const weekStart = new Date(startD);
     weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1); // จันทร์ของสัปดาห์ที่เริ่ม
     return {
@@ -1228,8 +1230,8 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, onBulkAdd, onBulkCreateWee
       weekStart: weekStart.toISOString().slice(0,10),
       activity: act.name,
       workType: "OT",
-      planQty: "100", actualQty: "0", unit: "%",
-      status: "รอดำเนินการ",
+      planQty: "100", actualQty: String(progressNum), unit: "%",
+      status: progressNum > 0 ? "กำลังทำ" : "รอดำเนินการ",
       note: `แตกอัตโนมัติจากแผนงาน · ${fmtDate(act.planStart)} → ${fmtDate(act.planEnd)}`,
       createdAt: new Date().toISOString(),
     };
