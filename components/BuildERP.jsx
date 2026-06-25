@@ -156,6 +156,25 @@ const fmtDate = (d) => {
 const sc = s => ({"กำลังดำเนินการ":"#f59e0b","เสร็จสิ้น":"#10b981","เริ่มใหม่":"#3b82f6","กำลังทำ":"#f59e0b","เสร็จแล้ว":"#10b981","รอดำเนินการ":"#64748b","ทำงาน":"#10b981","ลาพัก":"#f59e0b","ชำระแล้ว":"#10b981","รอชำระ":"#f59e0b","ร่าง":"#64748b","ต่ำ":"#10b981","กลาง":"#f59e0b","สูง":"#ef4444"}[s]||"#64748b");
 const uid = p => p+(Date.now()%100000);
 
+// แปลงค่าวันที่ใดๆ (string "YYYY-MM-DD" ธรรมดา, หรือ ISO timestamp ที่ Google Sheets แปลงให้อัตโนมัติ
+// เช่น "2026-05-10T17:00:00.000Z") ให้เป็น "YYYY-MM-DD" แบบเดียวกันเสมอ เพื่อเทียบ string ตรงกันได้
+// โดยไม่พลาดเพราะ timezone offset ที่ Sheets ใส่เพิ่มมาให้เวลาอ่าน/เขียนผ่าน Apps Script
+const dateKey = (d) => {
+  if (!d) return "";
+  const s = String(d);
+  // ถ้าเป็น "YYYY-MM-DD" อยู่แล้ว (10 ตัวอักษรพอดี ไม่มี T) ใช้ตรงๆได้เลย ไม่ต้องผ่าน Date object
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // ถ้ามี timestamp/timezone ติดมา ให้ตัดเอาแค่ส่วนวันที่จาก UTC ตรงๆ (ไม่ผ่าน local timezone conversion)
+  // เพราะ Google Sheets เก็บเป็นเที่ยงคืนของวันนั้นบวก timezone offset เสมอ ตัดตรงนี้แม่นที่สุด
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  try {
+    const dt = new Date(s);
+    if (isNaN(dt.getTime())) return s;
+    return dt.toISOString().slice(0,10);
+  } catch { return s; }
+};
+
 // ===== MS Project XML Parser =====
 // แปลง MS Project XML (Save As > XML จาก MS Project) เป็นโครงสร้าง 2 ชั้น: หมวดงาน (category) + รายการงาน
 // OutlineLevel 1 = หมวดงาน, Level 2+ = รายการงาน (รวม Level 3+ เข้า Level 2 ที่ใกล้ที่สุด ตามที่ตกลงกัน)
@@ -979,7 +998,7 @@ function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFi
       </div>
 
       {weeks.map(w => {
-        const weekPlans = plans.filter(p => p.weekStart === w.start);
+        const weekPlans = plans.filter(p => dateKey(p.weekStart) === w.start);
         return (
           <Card key={w.start}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
