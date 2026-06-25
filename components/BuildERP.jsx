@@ -157,21 +157,23 @@ const sc = s => ({"กำลังดำเนินการ":"#f59e0b","เส
 const uid = p => p+(Date.now()%100000);
 
 // แปลงค่าวันที่ใดๆ (string "YYYY-MM-DD" ธรรมดา, หรือ ISO timestamp ที่ Google Sheets แปลงให้อัตโนมัติ
-// เช่น "2026-05-10T17:00:00.000Z") ให้เป็น "YYYY-MM-DD" แบบเดียวกันเสมอ เพื่อเทียบ string ตรงกันได้
-// โดยไม่พลาดเพราะ timezone offset ที่ Sheets ใส่เพิ่มมาให้เวลาอ่าน/เขียนผ่าน Apps Script
+// เช่น "2026-05-10T17:00:00.000Z" ซึ่งคือเที่ยงคืนของวันที่ 11 ตามเวลาไทย แต่เขียนเป็นวันที่ 10 ใน UTC)
+// ให้เป็น "YYYY-MM-DD" ตรงกับวันที่ตามเวลาท้องถิ่นที่ตั้งใจไว้จริง ไม่ใช่วันที่ใน UTC ตรงๆ
 const dateKey = (d) => {
   if (!d) return "";
   const s = String(d);
-  // ถ้าเป็น "YYYY-MM-DD" อยู่แล้ว (10 ตัวอักษรพอดี ไม่มี T) ใช้ตรงๆได้เลย ไม่ต้องผ่าน Date object
+  // ถ้าเป็น "YYYY-MM-DD" อยู่แล้ว (ไม่มี T ต่อท้าย) ใช้ตรงๆได้เลย ไม่ต้องผ่าน Date object
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // ถ้ามี timestamp/timezone ติดมา ให้ตัดเอาแค่ส่วนวันที่จาก UTC ตรงๆ (ไม่ผ่าน local timezone conversion)
-  // เพราะ Google Sheets เก็บเป็นเที่ยงคืนของวันนั้นบวก timezone offset เสมอ ตัดตรงนี้แม่นที่สุด
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (m) return m[1];
+  // ถ้ามี timestamp/timezone ติดมา (กรณี Google Sheets แปลงให้) ต้องผ่าน Date object แล้วอ่านวันที่
+  // แบบ local time (getDate/getMonth/getFullYear) ไม่ใช่ UTC (getUTCDate ฯลฯ) เพราะ Sheets เก็บเป็น
+  // เที่ยงคืนของวันที่ตั้งใจ "ตามเวลาเครื่องที่เขียนข้อมูล" แล้วแปลงเป็น UTC ทับเวลาไปอีกที
   try {
     const dt = new Date(s);
     if (isNaN(dt.getTime())) return s;
-    return dt.toISOString().slice(0,10);
+    const dd = String(dt.getDate()).padStart(2,"0");
+    const mm = String(dt.getMonth()+1).padStart(2,"0");
+    const yyyy = dt.getFullYear();
+    return `${yyyy}-${mm}-${dd}`;
   } catch { return s; }
 };
 
