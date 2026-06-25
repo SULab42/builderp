@@ -867,6 +867,7 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
 function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFilter }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [weekOffset, setWeekOffset] = useState(0); // เลื่อนดูสัปดาห์อื่นได้ — 0 = สัปดาห์นี้เป็นจุดเริ่ม
   const myProjects = role?.projectIds === "ALL" || !role?.projectIds
     ? data.projects
     : data.projects.filter(p => role.projectIds.split(",").includes(p.id));
@@ -915,7 +916,16 @@ function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFi
     setShowForm(true);
   };
 
-  const weeks = [0,1,2].map(i => ({ offset:i, start: getWeekStart(i), label: i===0?"สัปดาห์นี้":i===1?"สัปดาห์หน้า":"อีก 2 สัปดาห์" }));
+  const weeks = [0,1,2].map(i => {
+    const actualOffset = weekOffset + i;
+    let label;
+    if (weekOffset === 0) {
+      label = i===0 ? "สัปดาห์นี้" : i===1 ? "สัปดาห์หน้า" : "อีก 2 สัปดาห์";
+    } else {
+      label = actualOffset === 0 ? "สัปดาห์นี้" : actualOffset > 0 ? `อีก ${actualOffset} สัปดาห์` : `ย้อนไป ${Math.abs(actualOffset)} สัปดาห์`;
+    }
+    return { offset: actualOffset, start: getWeekStart(actualOffset), label };
+  });
   const plans = data.weekly || [];
 
   return (
@@ -953,13 +963,28 @@ function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFi
         </Card>
       )}
 
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#0d1929", border:"1px solid #1e293b", borderRadius:10, padding:"8px 14px" }}>
+        <button onClick={()=>setWeekOffset(o=>o-3)}
+          style={{ background:"#1e293b", border:"1px solid #334155", borderRadius:8, padding:"6px 14px", color:"#94a3b8", fontSize:12, cursor:"pointer" }}>
+          ← ก่อนหน้า
+        </button>
+        <button onClick={()=>setWeekOffset(0)} disabled={weekOffset===0}
+          style={{ background:weekOffset===0?"#a78bfa22":"#1e293b", border:`1px solid ${weekOffset===0?"#a78bfa":"#334155"}`, borderRadius:8, padding:"6px 14px", color:weekOffset===0?"#a78bfa":"#94a3b8", fontSize:12, cursor:weekOffset===0?"default":"pointer", fontWeight:weekOffset===0?700:400 }}>
+          🔵 ปัจจุบัน
+        </button>
+        <button onClick={()=>setWeekOffset(o=>o+3)}
+          style={{ background:"#1e293b", border:"1px solid #334155", borderRadius:8, padding:"6px 14px", color:"#94a3b8", fontSize:12, cursor:"pointer" }}>
+          ถัดไป →
+        </button>
+      </div>
+
       {weeks.map(w => {
         const weekPlans = plans.filter(p => p.weekStart === w.start);
         return (
           <Card key={w.start}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
               <div style={{ color:"#e2e8f0", fontSize:14, fontWeight:700 }}>
-                {w.offset===0 ? "🔵" : w.offset===1 ? "🟡" : "⚪"} {w.label}
+                {w.offset===0 ? "🔵" : w.offset<0 ? "⚫" : w.offset===1 ? "🟡" : "⚪"} {w.label}
               </div>
               <span style={{ color:"#475569", fontSize:11 }}>{fmtDate(w.start)}</span>
             </div>
