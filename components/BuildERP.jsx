@@ -177,6 +177,16 @@ const dateKey = (d) => {
   } catch { return s; }
 };
 
+// นับจำนวนวันรวมทั้งวันเริ่มและวันจบ (inclusive) เช่น 1/3 ถึง 5/3 = 5 วัน ตรงกับวิธีนับวันงานก่อสร้างทั่วไป
+// คืน null ถ้าวันที่ใดวันหนึ่งไม่มีค่า (ยังไม่กรอก/ยังไม่เสร็จ) เพื่อให้ฝั่งแสดงผลรู้ว่าควรซ่อนตัวเลขนี้
+const daysBetween = (start, end) => {
+  if (!start || !end) return null;
+  const s = new Date(dateKey(start));
+  const e = new Date(dateKey(end));
+  if (isNaN(s.getTime()) || isNaN(e.getTime())) return null;
+  return Math.round((e - s) / 86400000) + 1;
+};
+
 // ===== MS Project XML Parser =====
 // แปลง MS Project XML (Save As > XML จาก MS Project) เป็นโครงสร้าง 2 ชั้น: หมวดงาน (category) + รายการงาน
 // OutlineLevel 1 = หมวดงาน, Level 2+ = รายการงาน (รวม Level 3+ เข้า Level 2 ที่ใกล้ที่สุด ตามที่ตกลงกัน)
@@ -609,7 +619,7 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
   const [photoNote, setPhotoNote] = useState("");
 
   // ── เลือกงานจาก 3-Weeks (multi-select) ──
-  const [selectedTasks, setSelectedTasks] = useState({}); // { weeklyPlanId: { qty, unit } }
+  const [selectedTasks, setSelectedTasks] = useState({}); // { weeklyPlanId: { qty, unit, done } }
   const [showEmergency, setShowEmergency] = useState(false);
   const [emergName, setEmergName] = useState("");
   const [emergReason, setEmergReason] = useState("เหตุฉุกเฉิน/อุบัติเหตุ");
@@ -636,6 +646,7 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
 
   const updateTaskQty = (id, qty) => setSelectedTasks(prev => ({ ...prev, [id]: { ...prev[id], qty } }));
   const updateTaskUnit = (id, unit) => setSelectedTasks(prev => ({ ...prev, [id]: { ...prev[id], unit } }));
+  const toggleDone = (id) => setSelectedTasks(prev => ({ ...prev, [id]: { ...prev[id], done: !prev[id]?.done } }));
 
   const resetForm = () => {
     setDate(todayStr); setWeather("ปกติ"); setWorkerPlan(""); setWorkerActual("");
@@ -675,10 +686,16 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
     for (const id of selectedIds) {
       const wp = activeWeeklyPlans.find(w => w.id === id);
       const t = selectedTasks[id];
-      if (!wp || !t.qty) continue;
+      if (!wp) continue;
       const newActual = Number(wp.actualQty || 0) + Number(t.qty || 0);
-      const newStatus = newActual >= Number(wp.planQty || 0) ? "เสร็จแล้ว" : "กำลังทำ";
-      await onUpdateWeekly(wp.id, { actualQty: newActual, status: newStatus });
+      const markedDone = !!t.done;
+      const newStatus = markedDone || newActual >= Number(wp.planQty || 0) ? "เสร็จแล้ว" : "กำลังทำ";
+      const patch = { actualQty: newActual, status: newStatus };
+      // วันเริ่มจริง — ถ้ายังไม่มี ให้ใช้วันที่รายงานนี้เป็นวันเริ่มจริงครั้งแรก
+      if (!wp.actualStart) patch.actualStart = date;
+      // วันจบจริง — ตั้งเมื่อกดปุ่ม "เสร็จงาน" เท่านั้น (ไม่ใช่แค่ตัวเลขครบตามแผน)
+      if (markedDone) patch.actualEnd = date;
+      await onUpdateWeekly(wp.id, patch);
     }
 
     resetForm();
@@ -758,7 +775,7 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
                             {isSel && (
                               <div onClick={e=>e.stopPropagation()} style={{ marginTop:10, paddingTop:10, borderTop:"1px solid #1e293b" }}>
                                 <div style={{ color:"#3b82f6", fontSize:10, marginBottom:6 }}>📥 ดึงยอดคงเหลือจาก 3-Weeks มาให้แล้ว — แก้ไขให้ตรงกับที่ทำได้จริงวันนี้</div>
-                                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                                <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                                   <span style={{ color:"#64748b", fontSize:11 }}>ทำได้วันนี้:</span>
                                   <input type="number" value={selectedTasks[wp.id]?.qty||""} onChange={e=>updateTaskQty(wp.id, e.target.value)}
                                     style={{ width:64, background:"#0d1929", border:"1px solid #f59e0b44", borderRadius:8, padding:"6px 8px", color:"#e2e8f0", fontSize:13 }} />
@@ -766,9 +783,17 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
                                     style={{ background:"#0d1929", border:"1px solid #334155", borderRadius:8, padding:"6px 8px", color:"#94a3b8", fontSize:12 }}>
                                     {["%","ตร.ม.","คิว","ม้วน","ท่อน","ชิ้น"].map(u=><option key={u} value={u}>{u}</option>)}
                                   </select>
-                                  <span style={{ marginLeft:"auto", color:"#475569", fontSize:11 }}>
+                                  <span style={{ color:"#475569", fontSize:11 }}>
                                     → สะสม <b style={{ color:"#f59e0b" }}>{Number(wp.actualQty||0)+Number(selectedTasks[wp.id]?.qty||0)}</b> {selectedTasks[wp.id]?.unit}
                                   </span>
+                                  <button onClick={()=>toggleDone(wp.id)}
+                                    style={{ marginLeft:"auto", background:selectedTasks[wp.id]?.done?"#10b98133":"#1e293b", border:`1px solid ${selectedTasks[wp.id]?.done?"#10b981":"#334155"}`, borderRadius:8, padding:"6px 12px", color:selectedTasks[wp.id]?.done?"#10b981":"#94a3b8", fontSize:11, cursor:"pointer", fontWeight:selectedTasks[wp.id]?.done?700:400 }}>
+                                    {selectedTasks[wp.id]?.done ? "✅ เสร็จงานแล้ว" : "☐ งานนี้เสร็จแล้ว?"}
+                                  </button>
+                                </div>
+                                <div style={{ display:"flex", gap:14, marginTop:8, fontSize:10, color:"#475569", flexWrap:"wrap" }}>
+                                  <span>📘 แผน: {fmtDate(wp.planStart)||"-"} → {fmtDate(wp.planEnd)||"-"}</span>
+                                  <span>📙 จริง: {fmtDate(wp.actualStart)||date} → {selectedTasks[wp.id]?.done ? fmtDate(date) : (fmtDate(wp.actualEnd)||"กำลังทำ")}</span>
                                 </div>
                               </div>
                             )}
@@ -857,6 +882,30 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
                 </div>
               </div>
 
+              {/* แสดงช่วงเวลา Plan vs Actual ของแต่ละงานที่ผูกกับรายงานนี้ */}
+              {r.linkedWeeklyIds && (() => {
+                const linkedIds = String(r.linkedWeeklyIds).split(",").filter(Boolean);
+                const linkedTasks = linkedIds.map(id => (data.weekly||[]).find(w => w.id === id)).filter(Boolean);
+                if (linkedTasks.length === 0) return null;
+                return (
+                  <div style={{ marginBottom:10, display:"flex", flexDirection:"column", gap:6 }}>
+                    {linkedTasks.map(wp => {
+                      const planDays = daysBetween(wp.planStart, wp.planEnd);
+                      const actualDays = daysBetween(wp.actualStart, wp.actualEnd);
+                      return (
+                        <div key={wp.id} style={{ background:"#0a112011", border:"1px solid #1e293b", borderRadius:8, padding:"8px 12px" }}>
+                          <div style={{ color:"#e2e8f0", fontSize:12, fontWeight:600, marginBottom:4 }}>{wp.activity}</div>
+                          <div style={{ display:"flex", gap:14, flexWrap:"wrap", fontSize:11 }}>
+                            <span style={{ color:"#3b82f6" }}>📘 แผน: {fmtDate(wp.planStart)||"-"} → {fmtDate(wp.planEnd)||"-"} {planDays!=null && `(${planDays} วัน)`}</span>
+                            <span style={{ color:"#f59e0b" }}>📙 จริง: {fmtDate(wp.actualStart)||"-"} → {fmtDate(wp.actualEnd)||"กำลังทำ"} {actualDays!=null && `(${actualDays} วัน)`}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
               {r.emergencyWork && (
                 <div style={{ background:"#ef444411", border:"1px solid #ef444433", borderRadius:8, padding:"8px 12px", marginBottom:10 }}>
                   <div style={{ color:"#ef4444", fontSize:11, fontWeight:700, marginBottom:3 }}>⚠️ งานฉุกเฉิน (ไม่รวมใน % คืบหน้า)</div>
@@ -911,6 +960,7 @@ function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFi
   const blankForm = {
     projectId: hideProjectFilter ? (data.projects[0]?.id || "") : "", weekStart: getWeekStart(0), activity:"",
     workType:"AR", planQty:"", actualQty:"", unit:"%", status:"กำลังทำ", note:"",
+    planStart:"", planEnd:"", actualStart:"", actualEnd:"", budget:"",
   };
   const [form, setForm] = useState(blankForm);
   const f = k => v => setForm(p=>({...p,[k]:v}));
@@ -932,10 +982,13 @@ function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFi
       projectId: p.projectId, weekStart: p.weekStart, activity: p.activity,
       workType: p.workType || "AR", planQty: p.planQty||"", actualQty: p.actualQty||"",
       unit: p.unit||"%", status: p.status||"กำลังทำ", note: p.note||"",
+      planStart: p.planStart||"", planEnd: p.planEnd||"",
+      actualStart: p.actualStart||"", actualEnd: p.actualEnd||"", budget: p.budget||"",
     });
     setEditingId(p.id);
     setShowForm(true);
   };
+
 
   const weeks = [0,1,2].map(i => {
     const actualOffset = weekOffset + i;
@@ -976,6 +1029,21 @@ function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFi
             <Inp label="ทำจริง (Actual)" value={form.actualQty} onChange={f("actualQty")} type="number" placeholder="0" />
             <Inp label="หน่วย" value={form.unit} onChange={f("unit")} placeholder="% หรือ ตร.ม." />
             <Sel label="สถานะ" value={form.status} onChange={f("status")} options={["รอดำเนินการ","กำลังทำ","เสร็จแล้ว","ล่าช้า"]} />
+            <Inp label="งบประมาณงานนี้ (บาท)" value={form.budget} onChange={f("budget")} type="number" placeholder="สำหรับคำนวณ S-Curve" />
+          </div>
+          <div style={{ marginTop:14, paddingTop:14, borderTop:"1px solid #1e293b" }}>
+            <div style={{ color:"#3b82f6", fontSize:12, fontWeight:700, marginBottom:8 }}>📘 ช่วงเวลาตามแผน (กรอกเอง)</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
+              <Inp label="วันเริ่มตามแผน" value={form.planStart} onChange={f("planStart")} type="date" />
+              <Inp label="วันสิ้นสุดตามแผน" value={form.planEnd} onChange={f("planEnd")} type="date" />
+            </div>
+          </div>
+          <div style={{ marginTop:14, paddingTop:14, borderTop:"1px solid #1e293b" }}>
+            <div style={{ color:"#f59e0b", fontSize:12, fontWeight:700, marginBottom:8 }}>📙 ช่วงเวลาตามจริง (อัพเดทอัตโนมัติจาก Daily Report ตอนกดเสร็จ — แก้เองได้)</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
+              <Inp label="วันเริ่มจริง" value={form.actualStart} onChange={f("actualStart")} type="date" />
+              <Inp label="วันสิ้นสุดจริง" value={form.actualEnd} onChange={f("actualEnd")} type="date" />
+            </div>
           </div>
           <div style={{ display:"flex", gap:8, marginTop:14 }}>
             <Btn onClick={submit} color="#10b981">บันทึก ✓</Btn>
@@ -1036,6 +1104,24 @@ function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFi
                         <Prog v={pct} color={pct>=100?"#10b981":pct>=60?"#f59e0b":"#ef4444"} />
                         <span style={{ color:"#64748b", fontSize:11, whiteSpace:"nowrap" }}>{p.actualQty||0}/{p.planQty||0} {p.unit}</span>
                       </div>
+                      {(p.planStart || p.actualStart) && (
+                        <div style={{ display:"flex", gap:14, marginTop:8, paddingTop:8, borderTop:"1px solid #1e293b22", flexWrap:"wrap" }}>
+                          <div style={{ fontSize:11 }}>
+                            <span style={{ color:"#3b82f6" }}>📘 แผน:</span>{" "}
+                            <span style={{ color:"#64748b" }}>
+                              {p.planStart ? fmtDate(p.planStart) : "-"} → {p.planEnd ? fmtDate(p.planEnd) : "-"}
+                              {daysBetween(p.planStart,p.planEnd) ? ` (${daysBetween(p.planStart,p.planEnd)} วัน)` : ""}
+                            </span>
+                          </div>
+                          <div style={{ fontSize:11 }}>
+                            <span style={{ color:"#f59e0b" }}>📙 จริง:</span>{" "}
+                            <span style={{ color:"#64748b" }}>
+                              {p.actualStart ? fmtDate(p.actualStart) : "-"} → {p.actualEnd ? fmtDate(p.actualEnd) : "กำลังทำ"}
+                              {daysBetween(p.actualStart,p.actualEnd) ? ` (${daysBetween(p.actualStart,p.actualEnd)} วัน)` : ""}
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1056,47 +1142,78 @@ function SCurve({ data, hideProjectPicker, fixedProjectId }) {
   const proj = data.projects.find(p => p.id === (fixedProjectId || selectedProj));
   const activeProjId = fixedProjectId || selectedProj;
 
-  // คำนวณ Plan/Actual % จาก weekly_plans (3-Weeks) จัดกลุ่มตามเดือน
-  const weeklyForProj = (data.weekly || []).filter(w => w.projectId === activeProjId);
-  const monthMap = {}; // { "2026-06": { planSum, actualSum, count } }
-  weeklyForProj.forEach(w => {
-    if (!w.weekStart) return;
-    const month = w.weekStart.slice(0,7); // YYYY-MM
-    if (!monthMap[month]) monthMap[month] = { planSum:0, actualSum:0, count:0 };
-    monthMap[month].planSum   += Number(w.planQty||0);
-    monthMap[month].actualSum += Number(w.actualQty||0);
-    monthMap[month].count++;
-  });
+  // งานทั้งหมดของโปรเจกต์นี้ที่มีวันเริ่ม-จบตามแผน (จำเป็นสำหรับคำนวณ S-Curve แบบถ่วงน้ำหนักงบ)
+  const tasksForProj = (data.weekly || []).filter(w => w.projectId === activeProjId && w.planStart && w.planEnd);
 
-  const sortedMonths = Object.keys(monthMap).sort();
-  const monthLabel = (m) => {
-    const [y,mo] = m.split("-");
+  // งบรวม — ถ้างานไหนไม่กรอกงบไว้ ให้ไม่นับน้ำหนัก (กรอกงบให้ครบทุกงานจะแม่นยำที่สุด)
+  const totalBudget = tasksForProj.reduce((sum, t) => sum + Number(t.budget || 0), 0);
+
+  // หาช่วงเวลารวมของทั้งโครงการ จากวันเริ่มแรกสุด ถึงวันจบช้าสุด (ทั้ง Plan และ Actual ที่มี)
+  const allDates = tasksForProj.flatMap(t => [t.planStart, t.planEnd, t.actualStart, t.actualEnd].filter(Boolean).map(dateKey));
+  const projStart = allDates.length ? allDates.reduce((a,b)=>a<b?a:b) : null;
+  const projEnd   = allDates.length ? allDates.reduce((a,b)=>a>b?a:b) : null;
+
+  // จัดช่วงเวลาเป็นจุดข้อมูลรายเดือน (เหมือนไฟล์ตัวอย่าง: ไม่ลงรายวัน แต่สรุปเป็นแกนเวลาเดียว)
+  const monthLabel = (y, mo) => {
     const thMonths = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
-    return thMonths[Number(mo)-1] || m;
+    return thMonths[mo] || "";
   };
 
-  // คำนวณ % สะสม (cumulative) จาก weekly_plans จริง
-  let cumPlan = 0, cumActual = 0;
-  const months = [];
-  const planValues = [];
-  const actualValues = [];
-
-  if (sortedMonths.length > 0) {
-    sortedMonths.forEach(m => {
-      const d = monthMap[m];
-      const planPct   = d.planSum   ? Math.min((d.planSum   / (d.count*100)) * 100, 100) : 0;
-      const actualPct = d.planSum   ? Math.min((d.actualSum / d.planSum) * 100, 100) : 0;
-      months.push(monthLabel(m));
-      planValues.push(Math.round(planPct));
-      actualValues.push(Math.round(actualPct));
-    });
+  const monthPoints = [];
+  if (projStart && projEnd) {
+    let cur = new Date(projStart);
+    cur.setDate(1); // เริ่มที่วันแรกของเดือนเริ่มโครงการ
+    const end = new Date(projEnd);
+    while (cur <= end) {
+      const y = cur.getFullYear(), mo = cur.getMonth();
+      // จุดข้อมูล ณ "สิ้นเดือนนี้" — ใช้วันสุดท้ายของเดือนเป็นจุดตัด %
+      const periodEnd = new Date(y, mo+1, 0);
+      monthPoints.push({ label: monthLabel(y, mo), cutoff: periodEnd.toISOString().slice(0,10) });
+      cur.setMonth(cur.getMonth()+1);
+    }
   }
 
-  // ถ้ายังไม่มีข้อมูล 3-Weeks เลย ให้ใช้ progress ของโปรเจกต์เป็น fallback เดียว
-  const hasRealData = sortedMonths.length > 0;
-  const finalMonths = hasRealData ? months : ["ยังไม่มีข้อมูล"];
-  const finalPlan   = hasRealData ? planValues  : [0];
-  const finalActual = hasRealData ? actualValues: [proj?.progress||0];
+  // คำนวณ % สะสม ณ จุดตัดเวลาหนึ่งๆ — สัดส่วนงานที่ "ผ่านไปแล้ว" ของแต่ละ task ถ่วงด้วยน้ำหนักงบ
+  // ถ้า cutoff > วันจบงาน = งานนั้นเสร็จ 100% ไปแล้ว ณ จุดนี้
+  // ถ้า cutoff < วันเริ่มงาน = ยังไม่เริ่ม นับเป็น 0%
+  // ถ้าอยู่ระหว่างนั้น = เฉลี่ยเชิงเส้นตามสัดส่วนวันที่ผ่านไปของระยะเวลางานนั้น (แบบเดียวกับไฟล์ตัวอย่าง)
+  const taskPctAtCutoff = (start, end, cutoff) => {
+    if (!start || !end) return 0;
+    const s = new Date(dateKey(start)).getTime();
+    const e = new Date(dateKey(end)).getTime();
+    const c = new Date(cutoff).getTime();
+    if (c < s) return 0;
+    if (c >= e) return 100;
+    if (e === s) return 100;
+    return ((c - s) / (e - s)) * 100;
+  };
+
+  const computeSeriesPct = (useActual) => {
+    return monthPoints.map(({ cutoff }) => {
+      if (totalBudget <= 0) return 0;
+      let weightedSum = 0;
+      tasksForProj.forEach(t => {
+        const w = Number(t.budget || 0) / totalBudget;
+        const start = useActual ? (t.actualStart || null) : t.planStart;
+        const end   = useActual ? (t.actualEnd   || null) : t.planEnd;
+        // Actual ที่ยังไม่จบ (actualEnd ว่าง) แต่เริ่มไปแล้ว — ถือว่ายังทำไม่เสร็จ นับ 0% ของงานนั้นในส่วน actual
+        // (อนุรักษ์นิยม ป้องกัน over-claim ความคืบหน้าจริงก่อนมีการยืนยันว่าจบงาน)
+        if (useActual && t.actualStart && !t.actualEnd) {
+          const c = new Date(cutoff).getTime();
+          const s = new Date(dateKey(t.actualStart)).getTime();
+          if (c >= s) weightedSum += w * 0; // เริ่มแล้วแต่ยังไม่จบ — ยังไม่นับ % เสร็จ ในเดือนนั้น (รอบันทึกวันจบจริงก่อน)
+          return;
+        }
+        weightedSum += w * taskPctAtCutoff(start, end, cutoff);
+      });
+      return Math.round(weightedSum * 100) / 100;
+    });
+  };
+
+  const hasRealData = tasksForProj.length > 0 && totalBudget > 0;
+  const finalMonths = hasRealData ? monthPoints.map(m=>m.label) : ["ยังไม่มีข้อมูล"];
+  const finalPlan   = hasRealData ? computeSeriesPct(false) : [0];
+  const finalActual = hasRealData ? computeSeriesPct(true)  : [proj?.progress||0];
 
   const maxW = 580, maxH = 220, padL = 40, padB = 30;
   const stepX = finalMonths.length > 1 ? (maxW - padL) / (finalMonths.length - 1) : 0;
@@ -1105,6 +1222,8 @@ function SCurve({ data, hideProjectPicker, fixedProjectId }) {
 
   const planPath = finalPlan.map((v,i) => `${i===0?"M":"L"} ${toX(i)} ${toY(v)}`).join(" ");
   const actualPath = finalActual.filter(v=>v!==null).map((v,i) => `${i===0?"M":"L"} ${toX(i)} ${toY(v)}`).join(" ");
+
+  const missingBudget = tasksForProj.length > 0 && tasksForProj.some(t => !t.budget);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
@@ -1124,9 +1243,15 @@ function SCurve({ data, hideProjectPicker, fixedProjectId }) {
         <>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12 }}>
             <StatCardSmall label="แผนปัจจุบัน" value={`${finalPlan[finalPlan.length-1]||0}%`} color="#3b82f6" />
-            <StatCardSmall label="ทำจริงปัจจุบัน (จาก 3-Weeks)" value={`${finalActual[finalActual.length-1]||0}%`} color="#f59e0b" />
-            <StatCardSmall label="ส่วนต่าง" value={`${(finalActual[finalActual.length-1]||0)-(finalPlan[finalPlan.length-1]||0)}%`} color={(finalActual[finalActual.length-1]||0)>=(finalPlan[finalPlan.length-1]||0)?"#10b981":"#ef4444"} />
+            <StatCardSmall label="ทำจริงปัจจุบัน" value={`${finalActual[finalActual.length-1]||0}%`} color="#f59e0b" />
+            <StatCardSmall label="ส่วนต่าง" value={`${Math.round((finalActual[finalActual.length-1]||0)-(finalPlan[finalPlan.length-1]||0))}%`} color={(finalActual[finalActual.length-1]||0)>=(finalPlan[finalPlan.length-1]||0)?"#10b981":"#ef4444"} />
           </div>
+
+          {missingBudget && (
+            <div style={{ color:"#f59e0b", fontSize:11, background:"#f59e0b11", border:"1px solid #f59e0b33", borderRadius:8, padding:"8px 12px" }}>
+              ⚠️ มีงานบางรายการใน 3-Weeks ที่ยังไม่กรอก "งบประมาณ" — กราฟนี้จะไม่นับน้ำหนักงานเหล่านั้น (% อาจไม่ตรง 100% เป๊ะ) แนะนำให้กรอกงบให้ครบทุกงาน
+            </div>
+          )}
 
           {/* S-Curve Chart */}
           <Card>
@@ -1154,7 +1279,7 @@ function SCurve({ data, hideProjectPicker, fixedProjectId }) {
             <div style={{ display:"flex", gap:16, marginTop:10, justifyContent:"center" }}>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <span style={{ width:14, height:2, background:"#3b82f6", display:"inline-block" }}/>
-                <span style={{ color:"#64748b", fontSize:11 }}>แผน (Plan)</span>
+                <span style={{ color:"#64748b", fontSize:11 }}>แผน (Plan) — ถ่วงน้ำหนักตามงบประมาณแต่ละงาน</span>
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                 <span style={{ width:14, height:2, background:"#f59e0b", display:"inline-block" }}/>
@@ -1163,11 +1288,10 @@ function SCurve({ data, hideProjectPicker, fixedProjectId }) {
             </div>
             {!hasRealData && (
               <div style={{ color:"#475569", fontSize:11, textAlign:"center", marginTop:10 }}>
-                💡 ยังไม่มีข้อมูลจาก "3-Weeks" — เพิ่มแผนงานในแท็บ 3-Weeks ก่อน เพื่อให้ S-Curve คำนวณอัตโนมัติ
+                💡 ยังไม่มีข้อมูล — เพิ่มแผนงานในแท็บ 3-Weeks พร้อมกรอก "วันเริ่ม/วันจบตามแผน" และ "งบประมาณ" ของแต่ละงาน เพื่อให้ S-Curve คำนวณอัตโนมัติ
               </div>
             )}
           </Card>
-
 
           {/* Bar Chart รายเดือน */}
           <Card>
