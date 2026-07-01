@@ -282,6 +282,81 @@ const Inp = ({label,value,onChange,type="text",placeholder=""})=>(
       style={{width:"100%",background:"#070f1c",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",color:"#e2e8f0",fontSize:13,boxSizing:"border-box"}}/>
   </div>
 );
+
+// ช่องกรอกวันที่แบบ dd/mm/yyyy (ไทย) เขียนเอง ไม่พึ่ง <input type="date"> ของเบราว์เซอร์
+// เพราะ format ของ input type=date ขึ้นกับ locale เครื่องผู้ใช้ (บางเครื่องเป็น mm/dd/yyyy)
+// ค่าที่เก็บจริง (value ที่ onChange ส่งออกไป) ยังเป็น "YYYY-MM-DD" เหมือนเดิมเสมอ
+// เพื่อให้เข้ากันได้กับ dateKey(), การเรียงลำดับ, และข้อมูลที่มีอยู่แล้วใน Google Sheets
+const DateInp = ({label,value,onChange})=>{
+  // แปลง "YYYY-MM-DD" (ค่าจริง) -> "dd/mm/yyyy" (ข้อความที่โชว์)
+  const toDisplay = (v) => {
+    if (!v) return "";
+    const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return "";
+    return `${m[3]}/${m[2]}/${m[1]}`;
+  };
+  const [text, setText] = useState(toDisplay(value));
+  // sync ค่าที่โชว์เมื่อ value จริงเปลี่ยนจากภายนอก (เช่นตอนกด startEdit โหลดข้อมูลเดิมมา)
+  useEffect(() => { setText(toDisplay(value)); }, [value]);
+
+  const handleTextChange = (raw) => {
+    // กรองให้พิมพ์ได้แค่ตัวเลขกับ "/" แล้วใส่ "/" ให้อัตโนมัติทุก 2 หลัก (dd → mm → yyyy)
+    let digits = raw.replace(/[^\d]/g, "").slice(0, 8);
+    let formatted = digits;
+    if (digits.length > 4) formatted = `${digits.slice(0,2)}/${digits.slice(2,4)}/${digits.slice(4)}`;
+    else if (digits.length > 2) formatted = `${digits.slice(0,2)}/${digits.slice(2)}`;
+    setText(formatted);
+
+    // พอครบ dd/mm/yyyy (8 หลัก) ค่อยแปลงเป็น YYYY-MM-DD ส่งออกผ่าน onChange
+    const m = formatted.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) {
+      const [, dd, mm, yyyy] = m;
+      const dNum = Number(dd), mNum = Number(mm), yNum = Number(yyyy);
+      const valid = mNum>=1 && mNum<=12 && dNum>=1 && dNum<=31 && yNum>=1900;
+      onChange(valid ? `${yyyy}-${mm}-${dd}` : "");
+    } else if (formatted === "") {
+      onChange("");
+    }
+  };
+
+  // ปุ่มปฏิทินเล็กๆ ข้างช่อง ใช้ native date picker แค่เป็นตัวช่วยเลือกแบบเร็ว (ไม่ได้โชว์ format ของมันเอง)
+  const pickerRef = useRef(null);
+  const openNativePicker = () => {
+    if (pickerRef.current?.showPicker) pickerRef.current.showPicker();
+    else pickerRef.current?.click();
+  };
+
+  return (
+    <div>
+      {label && <label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>{label}</label>}
+      <div style={{ position:"relative" }}>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={text}
+          onChange={e=>handleTextChange(e.target.value)}
+          placeholder="dd/mm/yyyy"
+          style={{width:"100%",background:"#070f1c",border:"1px solid #1e293b",borderRadius:8,padding:"8px 36px 8px 12px",color:"#e2e8f0",fontSize:13,boxSizing:"border-box",fontFamily:"'Sarabun',sans-serif"}}
+        />
+        <button type="button" onClick={openNativePicker}
+          style={{ position:"absolute", right:6, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", cursor:"pointer", fontSize:14, padding:4, color:"#475569" }}
+          title="เลือกจากปฏิทิน">
+          📅
+        </button>
+        {/* native date input ซ่อนไว้ ใช้แค่เป็น picker ช่วยเลือกวันเร็วๆ ไม่ได้โชว์ format ของมันเอง */}
+        <input
+          ref={pickerRef}
+          type="date"
+          value={value || ""}
+          onChange={e=>{ onChange(e.target.value); setText(toDisplay(e.target.value)); }}
+          style={{ position:"absolute", inset:0, width:"100%", height:"100%", opacity:0, pointerEvents:"none" }}
+          tabIndex={-1}
+        />
+      </div>
+    </div>
+  );
+};
+
 const Sel = ({label,value,onChange,options})=>(
   <div>
     {label&&<label style={{color:"#64748b",fontSize:11,display:"block",marginBottom:4}}>{label}</label>}
@@ -742,7 +817,7 @@ function DailyReport({ data, user, role, onAdd, onRemove, onUpdateWeekly, hidePr
                 <Sel label="โปรเจกต์ *" value={reportProjectId} onChange={setReportProjectId}
                   options={[{value:"",label:"-- เลือก --"},...myProjects.map(p=>({value:p.id,label:p.name}))]} />
               )}
-              <Inp label="วันที่" value={date} onChange={setDate} type="date" />
+              <DateInp label="วันที่" value={date} onChange={setDate} />
               <Sel label="สภาพอากาศ" value={weather} onChange={setWeather} options={["ปกติ","ฝนตก","แดดจัด","ลมแรง"]} />
             </div>
 
@@ -1034,15 +1109,15 @@ function WeeklyPlan({ data, user, role, onAdd, onUpdate, onRemove, hideProjectFi
           <div style={{ marginTop:14, paddingTop:14, borderTop:"1px solid #1e293b" }}>
             <div style={{ color:"#3b82f6", fontSize:12, fontWeight:700, marginBottom:8 }}>📘 ช่วงเวลาตามแผน (กรอกเอง)</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
-              <Inp label="วันเริ่มตามแผน" value={form.planStart} onChange={f("planStart")} type="date" />
-              <Inp label="วันสิ้นสุดตามแผน" value={form.planEnd} onChange={f("planEnd")} type="date" />
+              <DateInp label="วันเริ่มตามแผน" value={form.planStart} onChange={f("planStart")} />
+              <DateInp label="วันสิ้นสุดตามแผน" value={form.planEnd} onChange={f("planEnd")} />
             </div>
           </div>
           <div style={{ marginTop:14, paddingTop:14, borderTop:"1px solid #1e293b" }}>
             <div style={{ color:"#f59e0b", fontSize:12, fontWeight:700, marginBottom:8 }}>📙 ช่วงเวลาตามจริง (อัพเดทอัตโนมัติจาก Daily Report ตอนกดเสร็จ — แก้เองได้)</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10 }}>
-              <Inp label="วันเริ่มจริง" value={form.actualStart} onChange={f("actualStart")} type="date" />
-              <Inp label="วันสิ้นสุดจริง" value={form.actualEnd} onChange={f("actualEnd")} type="date" />
+              <DateInp label="วันเริ่มจริง" value={form.actualStart} onChange={f("actualStart")} />
+              <DateInp label="วันสิ้นสุดจริง" value={form.actualEnd} onChange={f("actualEnd")} />
             </div>
           </div>
           <div style={{ display:"flex", gap:8, marginTop:14 }}>
@@ -1595,11 +1670,11 @@ function GanttPlan({ data, onAdd, onUpdate, onRemove, onBulkAdd, onBulkCreateWee
             )}
             <Inp label="หมวดงาน" value={form.category} onChange={f("category")} placeholder="เช่น งานสถาปัตยกรรม" />
             <Inp label="ชื่องาน (Task Name) *" value={form.name} onChange={f("name")} placeholder="งานฐานราก" />
-            <Inp label="วันเริ่มทำงาน *" value={form.planStart} onChange={setPlanStart} type="date" />
+            <DateInp label="วันเริ่มทำงาน *" value={form.planStart} onChange={setPlanStart} />
             <Inp label="ระยะเวลา (วัน)" value={form.duration} onChange={setDuration} type="number" placeholder="10" />
-            <Inp label="วันสิ้นสุด *" value={form.planEnd} onChange={setPlanEnd} type="date" />
-            <Inp label="เริ่มจริง" value={form.actualStart} onChange={f("actualStart")} type="date" />
-            <Inp label="จบจริง" value={form.actualEnd} onChange={f("actualEnd")} type="date" />
+            <DateInp label="วันสิ้นสุด *" value={form.planEnd} onChange={setPlanEnd} />
+            <DateInp label="เริ่มจริง" value={form.actualStart} onChange={f("actualStart")} />
+            <DateInp label="จบจริง" value={form.actualEnd} onChange={f("actualEnd")} />
             <Inp label="ความคืบหน้า (%)" value={form.progress} onChange={f("progress")} type="number" />
             <Sel label="Critical Path?" value={form.critical} onChange={f("critical")} options={[{value:"no",label:"ไม่ใช่"},{value:"yes",label:"ใช่"}]} />
           </div>
@@ -2032,7 +2107,7 @@ function Invoices({data,onAdd,onUpdate,onRemove}) {
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:14}}>
             <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")} options={[{v:"",l:"-- เลือก --"},...data.projects.map(p=>({v:p.id,l:p.name}))]}/>
             <Inp label="ชื่อลูกค้า *" value={form.client} onChange={f("client")}/>
-            <Inp label="วันครบกำหนด" value={form.dueDate} onChange={f("dueDate")} type="date"/>
+            <DateInp label="วันครบกำหนด" value={form.dueDate} onChange={f("dueDate")} />
             <Inp label="หมายเหตุ" value={form.note} onChange={f("note")} placeholder="งวดที่ 1"/>
           </div>
           <div style={{marginBottom:10}}>
@@ -2428,9 +2503,9 @@ function Projects({data,onAdd,onUpdate,onRemove,onOpen}) {
             <Inp label="งบประมาณ (บาท) *" value={form.budget} onChange={f("budget")} type="number"/>
             <Inp label="ผู้จัดการ" value={form.manager} onChange={f("manager")}/>
             <Inp label="โฟร์แมนผู้ดูแล" value={form.foreman} onChange={f("foreman")}/>
-            <Inp label="วันเริ่ม" value={form.startDate} onChange={f("startDate")} type="date"/>
-            <Inp label="วันสิ้นสุด" value={form.endDate} onChange={f("endDate")} type="date"/>
-            <Inp label="วันเครื่องเข้า" value={form.mobilizeDate} onChange={f("mobilizeDate")} type="date"/>
+            <DateInp label="วันเริ่ม" value={form.startDate} onChange={f("startDate")} />
+            <DateInp label="วันสิ้นสุด" value={form.endDate} onChange={f("endDate")} />
+            <DateInp label="วันเครื่องเข้า" value={form.mobilizeDate} onChange={f("mobilizeDate")} />
           </div>
           <div style={{display:"flex",gap:8,marginTop:12}}>
             <Btn onClick={submit} color="#10b981">บันทึก ✓</Btn>
@@ -2531,7 +2606,7 @@ function Tasks({data,onAdd,onUpdate,onRemove}) {
             <Inp label="ชื่องาน *" value={form.title} onChange={f("title")}/>
             <Inp label="ผู้รับผิดชอบ" value={form.assignee} onChange={f("assignee")}/>
             <Inp label="ประเภท" value={form.category} onChange={f("category")}/>
-            <Inp label="กำหนดส่ง" value={form.due} onChange={f("due")} type="date"/>
+            <DateInp label="กำหนดส่ง" value={form.due} onChange={f("due")} />
             <Sel label="โปรเจกต์ *" value={form.projectId} onChange={f("projectId")} options={[{value:"",label:"-- เลือก --"},...data.projects.map(p=>({value:p.id,label:p.name}))]}/>
             <Sel label="ความสำคัญ" value={form.priority} onChange={f("priority")} options={["สูง","กลาง","ต่ำ"]}/>
             {editingId && <Sel label="สถานะ" value={form.status} onChange={f("status")} options={["รอดำเนินการ","กำลังทำ","เสร็จแล้ว"]}/>}
